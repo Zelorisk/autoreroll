@@ -1,0 +1,36 @@
+{
+  "category.villagerreroller": "Villager Trade Reroller",
+  "key.villagerreroller.toggle": "Toggle Mod",
+  "key.villagerreroller.emergency_stop": "Emergency Stop",
+  "key.villagerreroller.manual_reroll": "Manual Reroll",
+  "key.villagerreroller.cycle_profile": "Cycle Profile",
+
+  "text.villagerreroller.enabled": "Enabled",
+  "text.villagerreroller.disabled": "Disabled",
+  "text.villagerreroller.mode": "Mode",
+  "text.villagerreroller.manual": "Manual",
+  "text.villagerreroller.semi_auto": "Semi-Auto",
+  "text.villagerreroller.full_auto": "Full Auto",
+
+  "text.villagerreroller.rerolling": "Rerolling...",
+  "text.villagerreroller.attempts": "Attempts",
+  "text.villagerreroller.max_attempts_reached": "Max attempts reached",
+  "text.villagerreroller.inventory_full": "Inventory full! Pausing reroll.",
+  "text.villagerreroller.trade_found": "Found matching trade!",
+  "text.villagerreroller.no_job_site": "Could not find job site block!",
+
+  "text.villagerreroller.stats.session": "Session Stats",
+  "text.villagerreroller.stats.rerolls": "Rerolls",
+  "text.villagerreroller.stats.found": "Found",
+  "text.villagerreroller.stats.average": "Avg",
+  "text.villagerreroller.stats.emeralds_saved": "Emeralds Saved",
+
+  "text.villagerreroller.config.title": "Villager Trade Reroller Config",
+  "text.villagerreroller.config.general": "General",
+  "text.villagerreroller.config.filters": "Trade Filters",
+  "text.villagerreroller.config.advanced": "Advanced",
+  "text.villagerreroller.config.safety": "Safety",
+  "text.villagerreroller.config.hud": "HUD",
+  "text.villagerreroller.config.profiles": "Profiles",
+  "text.villagerreroller.config.statistics": "Statistics"
+}

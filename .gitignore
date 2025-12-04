@@ -1,0 +1,57 @@
+# Gradle
+.gradle/
+build/
+out/
+classes/
+
+# Eclipse
+*.launch
+.settings/
+.metadata
+.classpath
+.project
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# Fabric
+run/
+*.log
+
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Minecraft
+minecraft/
+config/
+mods/
+resourcepacks/
+saves/
+screenshots/
+crash-reports/
+
+# Compiled files
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Local config
+/config/villagerreroller/
