@@ -37,7 +37,7 @@ public class ConfigScreen {
                 .build());
 
         general.addEntry(entryBuilder.startEnumSelector(Text.literal("Operation Mode"), ModConfig.OperationMode.class, config.getOperationMode())
-                .setDefaultValue(ModConfig.OperationMode.MANUAL)
+                .setDefaultValue(ModConfig.OperationMode.FULL_AUTO)
                 .setTooltip(Text.literal("MANUAL: Highlight only, SEMI_AUTO: Breaks only, FULL_AUTO: Complete automation"))
                 .setSaveConsumer(config::setOperationMode)
                 .build());
@@ -64,6 +64,12 @@ public class ConfigScreen {
                 .setDefaultValue(ModConfig.NotificationStyle.ACTION_BAR)
                 .setTooltip(Text.literal("Where to display notifications"))
                 .setSaveConsumer(config::setNotificationStyle)
+                .build());
+
+        general.addEntry(entryBuilder.startBooleanToggle(Text.literal("Open GUI Only When Matched"), config.isOpenGuiOnlyWhenMatched())
+                .setDefaultValue(false)
+                .setTooltip(Text.literal("Only open the trading GUI when a matching trade is found.\nWhen disabled, GUI opens every attempt to check trades."))
+                .setSaveConsumer(config::setOpenGuiOnlyWhenMatched)
                 .build());
 
         // Trade Filters Category
@@ -184,6 +190,30 @@ public class ConfigScreen {
                 .setDefaultValue(true)
                 .setTooltip(Text.literal("Show progress bar for reroll attempts"))
                 .setSaveConsumer(config::setShowProgressBar)
+                .build());
+
+        // Reach & Placement Category
+        ConfigCategory reachPlacement = builder.getOrCreateCategory(Text.literal("Reach & Placement"));
+
+        reachPlacement.addEntry(entryBuilder.startIntSlider(Text.literal("Interaction Reach"), (int)(config.getInteractionReach() * 10), 30, 100)
+                .setDefaultValue(45)
+                .setTooltip(Text.literal("How far you can interact with villagers (blocks * 10)\nDefault: 4.5 blocks\nIncrease if villager is slightly too far away"))
+                .setSaveConsumer(value -> config.setInteractionReach(value / 10.0))
+                .setTextGetter(value -> Text.literal(String.format("%.1f blocks", value / 10.0)))
+                .build());
+
+        reachPlacement.addEntry(entryBuilder.startIntSlider(Text.literal("Placement Reach"), config.getPlacementReach(), 3, 15)
+                .setDefaultValue(8)
+                .setTooltip(Text.literal("How far to search for placement locations\nDefault: 8 blocks\nIncrease if placements are failing due to distance"))
+                .setSaveConsumer(config::setPlacementReach)
+                .setTextGetter(value -> Text.literal(value + " blocks"))
+                .build());
+
+        reachPlacement.addEntry(entryBuilder.startIntSlider(Text.literal("Job Site Search Reach"), config.getJobSiteSearchReach(), 3, 20)
+                .setDefaultValue(8)
+                .setTooltip(Text.literal("How far to search for existing job sites\nDefault: 8 blocks\nIncrease if mod can't find villager's workstation"))
+                .setSaveConsumer(config::setJobSiteSearchReach)
+                .setTextGetter(value -> Text.literal(value + " blocks"))
                 .build());
 
         // Profiles Category

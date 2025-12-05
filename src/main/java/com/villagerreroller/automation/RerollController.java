@@ -25,6 +25,7 @@ public class RerollController {
     private int currentAttempts = 0;
     private long lastRerollTime = 0;
     private boolean emergencyStop = false;
+    private boolean matchFound = false; // Flag to prevent further actions after match
 
     // State machine for tick-based processing
     private enum RerollState {
@@ -45,6 +46,9 @@ public class RerollController {
     private BlockPos currentJobSite = null;
     private boolean stateActionStarted = false; // Flag to ensure one-time actions per state
     private int placementRetries = 0; // Track placement retry attempts
+    private long lastStatusLogTime = 0; // Track when we last logged status
+    private int initialPlacementAttempts = 0; // Track attempts to find a suitable placement position
+    private int consecutivePlacementFailures = 0; // Track consecutive placement failures
 
     public RerollController() {
         this.client = MinecraftClient.getInstance();
@@ -77,8 +81,10 @@ public class RerollController {
         this.currentAttempts = 0;
         this.isRunning = true;
         this.emergencyStop = false;
+        this.matchFound = false; // Reset match flag
         this.lastRerollTime = System.currentTimeMillis();
         this.placementRetries = 0; // Reset placement retry counter
+        this.consecutivePlacementFailures = 0; // Reset placement failure counter
 
         VillagerReroller.LOGGER.info("=== Starting reroll for villager {} ===", villager.getUuid());
         NotificationHelper.sendMessage("Starting trade reroll...");
@@ -120,7 +126,9 @@ public class RerollController {
             // Stop any player movement
             stopPlayerMovement();
 
-            VillagerReroller.LOGGER.info("Stopped rerolling");
+            String stopReason = matchFound ? "Match found" : "Manual stop/Error";
+            VillagerReroller.LOGGER.info("Stopped rerolling - Reason: {} - Final State: {} - Attempts: {}",
+                stopReason, currentState, currentAttempts);
             NotificationHelper.sendMessage("Reroll stopped. Attempts: " + currentAttempts);
 
             if (currentVillager != null) {
@@ -132,6 +140,7 @@ public class RerollController {
             currentAttempts = 0;
             currentState = RerollState.IDLE;
             currentJobSite = null;
+            matchFound = false; // Reset match flag
         }
     }
 
@@ -179,9 +188,33 @@ public class RerollController {
             return;
         }
 
-        if (currentVillager == null || !currentVillager.isAlive()) {
-            VillagerReroller.LOGGER.warn("Villager is null or dead, stopping reroll");
-            NotificationHelper.sendMessage("Villager lost! Stopping reroll.");
+        // CRITICAL: If match was found, don't process any more state machine ticks
+        if (matchFound) {
+            VillagerReroller.LOGGER.debug("Match found flag is set, skipping state machine tick");
+            return;
+        }
+
+        if (currentVillager == null) {
+            VillagerReroller.LOGGER.error("UNEXPECTED STOP: currentVillager is NULL - State: {} - Attempts: {}",
+                currentState, currentAttempts);
+            NotificationHelper.sendMessage("§cVillager is null! Stopping reroll.");
+            stopRerolling();
+            return;
+        }
+
+        if (!currentVillager.isAlive()) {
+            VillagerReroller.LOGGER.error("UNEXPECTED STOP: Villager died - State: {} - Attempts: {}",
+                currentState, currentAttempts);
+            NotificationHelper.sendMessage("§cVillager died! Stopping reroll.");
+            stopRerolling();
+            return;
+        }
+
+        // Check if villager is still in loaded chunks
+        if (currentVillager.isRemoved()) {
+            VillagerReroller.LOGGER.error("UNEXPECTED STOP: Villager was removed (chunk unload?) - State: {} - Attempts: {}",
+                currentState, currentAttempts);
+            NotificationHelper.sendMessage("§cVillager unloaded! Stopping reroll.");
             stopRerolling();
             return;
         }
@@ -193,20 +226,51 @@ public class RerollController {
         VillagerReroller.LOGGER.debug("Tick: state={}, time={}ms, attempts={}/{}",
             currentState, timeSinceStateStart, currentAttempts, config.getMaxRerollAttempts());
 
+        // Log status every 5 seconds for debugging
+        if (now - lastStatusLogTime > 5000) {
+            VillagerReroller.LOGGER.info("STATUS: State={} ({} seconds) | Attempts={}/{} | JobSite={} | Villager={} blocks away",
+                currentState,
+                String.format("%.1f", timeSinceStateStart / 1000.0),
+                currentAttempts,
+                config.getMaxRerollAttempts(),
+                currentJobSite != null ? currentJobSite.toShortString() : "none",
+                client.player != null ? String.format("%.1f", client.player.distanceTo(currentVillager)) : "?");
+            lastStatusLogTime = now;
+        }
+
         // State machine processing
         switch (currentState) {
             case INITIAL_PLACEMENT:
                 // Place initial workstation if none exists
                 if (!stateActionStarted) {
-                    VillagerReroller.LOGGER.info("Attempting initial workstation placement...");
+                    initialPlacementAttempts++;
+                    int maxPlacementReach = config.getPlacementReach();
+                    int searchRadius = Math.min(3 + initialPlacementAttempts, maxPlacementReach); // Start at 3, expand to configured max
+                    VillagerReroller.LOGGER.info("Attempting initial workstation placement (attempt {}/5, search radius {})...",
+                        initialPlacementAttempts, searchRadius);
 
-                    // Find a suitable position near the villager
+                    // Find a suitable position near the villager with expanding search radius
                     BlockPos villagerPos = currentVillager.getBlockPos();
-                    BlockPos placementPos = findSuitablePlacementPosition(villagerPos);
+                    BlockPos placementPos = findSuitablePlacementPosition(villagerPos, searchRadius);
 
                     if (placementPos == null) {
-                        VillagerReroller.LOGGER.error("No suitable placement position found!");
-                        NotificationHelper.sendMessage("Cannot find place for workstation! Clear space near villager.");
+                        // Retry up to 5 times with expanding search radius
+                        if (initialPlacementAttempts < 5) {
+                            VillagerReroller.LOGGER.warn("No placement position found at radius {}, retrying with larger radius (attempt {}/5)...",
+                                searchRadius, initialPlacementAttempts + 1);
+                            NotificationHelper.sendMessage("§6Searching for workstation placement spot... (attempt " + initialPlacementAttempts + "/5)");
+
+                            // Wait a bit before retrying to let the state reset
+                            try {
+                                Thread.sleep(100);
+                            } catch (InterruptedException e) {
+                                // Ignore
+                            }
+                            return; // Try again next tick with larger radius
+                        }
+
+                        VillagerReroller.LOGGER.error("No suitable placement position found after 5 attempts!");
+                        NotificationHelper.sendMessage("§cCannot find place for workstation after 5 attempts! Clear space near villager.");
                         stopRerolling();
                         return;
                     }
@@ -215,14 +279,29 @@ public class RerollController {
                     boolean placed = jobSiteHandler.placeInitialJobSite(placementPos);
 
                     if (!placed) {
-                        VillagerReroller.LOGGER.error("Failed to place initial workstation!");
-                        NotificationHelper.sendMessage("Failed to place workstation! Make sure you have one in inventory.");
+                        if (initialPlacementAttempts < 5) {
+                            VillagerReroller.LOGGER.warn("Failed to place at {}, retrying... (attempt {}/5)",
+                                placementPos, initialPlacementAttempts + 1);
+                            NotificationHelper.sendMessage("§6Retrying workstation placement... (attempt " + initialPlacementAttempts + "/5)");
+
+                            try {
+                                Thread.sleep(100);
+                            } catch (InterruptedException e) {
+                                // Ignore
+                            }
+                            return;
+                        }
+
+                        VillagerReroller.LOGGER.error("Failed to place initial workstation after 5 attempts!");
+                        NotificationHelper.sendMessage("§cFailed to place workstation after 5 attempts! Make sure you have one in inventory.");
                         stopRerolling();
                         return;
                     }
 
                     currentJobSite = placementPos;
-                    VillagerReroller.LOGGER.info("Placed initial workstation at {}", placementPos);
+                    VillagerReroller.LOGGER.info("✓ Placed initial workstation at {} (attempt {})", placementPos, initialPlacementAttempts);
+                    NotificationHelper.sendMessage("§aWorkstation placed successfully!");
+                    initialPlacementAttempts = 0; // Reset for next time
                     stateActionStarted = true;
                 }
 
@@ -244,8 +323,15 @@ public class RerollController {
                 break;
 
             case WAITING_TO_BREAK:
+                // CRITICAL SAFETY CHECK: Never break lectern if match was found
+                if (matchFound) {
+                    VillagerReroller.LOGGER.warn("SAFETY: Prevented lectern break - match was found!");
+                    return;
+                }
+
                 // Check max attempts
                 if (currentAttempts >= config.getMaxRerollAttempts()) {
+                    VillagerReroller.LOGGER.info("Max attempts reached: {}/{}", currentAttempts, config.getMaxRerollAttempts());
                     NotificationHelper.sendMessage("Max attempts reached (" + currentAttempts + ")");
                     stopRerolling();
                     return;
@@ -253,6 +339,7 @@ public class RerollController {
 
                 // Check if inventory is full
                 if (config.isPauseIfInventoryFull() && isInventoryFull()) {
+                    VillagerReroller.LOGGER.info("Inventory full, pausing reroll");
                     NotificationHelper.sendMessage("Inventory full! Pausing reroll.");
                     stopRerolling();
                     return;
@@ -261,6 +348,8 @@ public class RerollController {
                 // Wait for cooldown
                 long timeSinceLastReroll = now - lastRerollTime;
                 if (timeSinceLastReroll < config.getRerollDelayMs()) {
+                    VillagerReroller.LOGGER.debug("Waiting for cooldown: {}ms / {}ms",
+                        timeSinceLastReroll, config.getRerollDelayMs());
                     return; // Still waiting
                 }
 
@@ -268,7 +357,7 @@ public class RerollController {
                 VillagerReroller.LOGGER.info("Looking for job site block near villager...");
                 currentJobSite = findJobSiteBlock();
                 if (currentJobSite == null) {
-                    VillagerReroller.LOGGER.warn("Could not find job site block for villager at {}", currentVillager.getPos());
+                    VillagerReroller.LOGGER.error("Could not find job site block for villager at {}", currentVillager.getPos());
                     NotificationHelper.sendMessage("Could not find job site block! Make sure villager has a workstation nearby.");
                     stopRerolling();
                     return;
@@ -278,12 +367,19 @@ public class RerollController {
                 // Move to breaking state
                 currentAttempts++;
                 lastRerollTime = now;
-                VillagerReroller.LOGGER.debug("Reroll attempt {} for villager", currentAttempts);
+                VillagerReroller.LOGGER.info("=== STARTING REROLL ATTEMPT {} ===", currentAttempts);
 
                 transitionToState(RerollState.BREAKING_BLOCK);
                 break;
 
             case BREAKING_BLOCK:
+                // CRITICAL SAFETY CHECK: Never break lectern if match was found
+                if (matchFound) {
+                    VillagerReroller.LOGGER.warn("SAFETY: Aborting block breaking - match was found!");
+                    jobSiteHandler.cancelBreaking();
+                    return;
+                }
+
                 // Start breaking on first entry to this state
                 if (!stateActionStarted) {
                     VillagerReroller.LOGGER.info("Starting to break job site at {}", currentJobSite);
@@ -414,11 +510,38 @@ public class RerollController {
                     boolean replaced = jobSiteHandler.replaceJobSite(currentJobSite);
 
                     if (!replaced) {
-                        VillagerReroller.LOGGER.error("Failed to place job site block at {}!", currentJobSite);
-                        NotificationHelper.sendMessage("§cFailed to place job site! Check inventory for workstation.");
-                        stopRerolling();
+                        consecutivePlacementFailures++;
+                        VillagerReroller.LOGGER.warn("Failed to place job site block at {}! (failure {}/50)", currentJobSite, consecutivePlacementFailures);
+
+                        // Give up after 50 consecutive failures
+                        if (consecutivePlacementFailures >= 50) {
+                            VillagerReroller.LOGGER.error("Failed to place workstation 50 times in a row! Stopping reroll.");
+                            NotificationHelper.sendMessage("§cFailed to place workstation 50 times! Area is permanently blocked.");
+                            stopRerolling();
+                            return;
+                        }
+
+                        // Wait for villager/entities to move, then retry placing
+                        VillagerReroller.LOGGER.info("Waiting 1 second for entities to move, then retrying placement...");
+                        NotificationHelper.sendMessage("§6Placement blocked (attempt " + consecutivePlacementFailures + "/50), waiting for villager to move...");
+
+                        try {
+                            Thread.sleep(1000); // Wait 1 second
+                        } catch (InterruptedException e) {
+                            // Ignore
+                        }
+
+                        // IMPORTANT: Don't transition to WAITING_TO_BREAK - we already have the lectern in inventory!
+                        // Just reset the state to try placing again at a different position
+                        stateActionStarted = false;
+                        stateStartTime = System.currentTimeMillis();
+                        VillagerReroller.LOGGER.info("Retrying placement in REPLACING_BLOCK state...");
+                        // Stay in REPLACING_BLOCK state to retry placement
                         return;
                     }
+
+                    // Placement succeeded! Reset failure counter
+                    consecutivePlacementFailures = 0;
 
                     // Find where the block was actually placed (might be alternative position)
                     BlockPos placedAt = findJobSiteBlockNear(originalAttemptPos, 2);
@@ -575,7 +698,7 @@ public class RerollController {
 
                 // Scan trades (one-time action)
                 if (!stateActionStarted) {
-                    VillagerReroller.LOGGER.info("Scanning trades...");
+                    VillagerReroller.LOGGER.info("=== SCANNING TRADES (Attempt {}) ===", currentAttempts);
                     TradeScanner scanner = new TradeScanner();
                     List<TradeScanner.ScannedTrade> trades = scanner.scanCurrentTrades();
 
@@ -583,28 +706,57 @@ public class RerollController {
 
                     if (!trades.isEmpty()) {
                         // Log all trades for debugging
+                        VillagerReroller.LOGGER.info("--- All Available Trades ---");
                         for (TradeScanner.ScannedTrade trade : trades) {
-                            VillagerReroller.LOGGER.debug("  Trade {}: {}", trade.getSlotIndex(), trade.toString());
+                            VillagerReroller.LOGGER.info("  [Slot {}] {}", trade.getSlotIndex(), trade.toString());
                         }
 
                         TradeFilter filter = new TradeFilter(config);
+                        List<TradeScanner.ScannedTrade> matchingTrades = filter.filterTrades(trades);
 
-                        if (filter.hasAnyMatchingTrade(trades)) {
-                            NotificationHelper.sendMessage("§aFound matching trade! Attempts: " + currentAttempts);
-                            VillagerReroller.LOGGER.info("Found matching trade after {} attempts", currentAttempts);
+                        if (!matchingTrades.isEmpty()) {
+                            // MATCH FOUND - Set flag immediately to prevent further state transitions
+                            matchFound = true;
+
+                            VillagerReroller.LOGGER.info("=== MATCH FOUND! ===");
+                            VillagerReroller.LOGGER.info("Found {} matching trade(s) after {} attempts:", matchingTrades.size(), currentAttempts);
+
+                            // Log each matching trade in detail
+                            for (TradeScanner.ScannedTrade matchedTrade : matchingTrades) {
+                                VillagerReroller.LOGGER.info("  ✓ MATCHED [Slot {}]: {}",
+                                    matchedTrade.getSlotIndex(),
+                                    matchedTrade.toString());
+                                VillagerReroller.LOGGER.info("    - Item: {}", matchedTrade.getItemId());
+                                VillagerReroller.LOGGER.info("    - Emerald Cost: {}", matchedTrade.getEmeraldCost());
+                                if (!matchedTrade.getEnchantmentNames().isEmpty()) {
+                                    VillagerReroller.LOGGER.info("    - Enchantments: {}", matchedTrade.getEnchantmentNames());
+                                }
+                            }
+
+                            VillagerReroller.LOGGER.info("=== STOPPING REROLL - MATCH FOUND ===");
+                            NotificationHelper.sendMessage("§a§l✓ FOUND MATCHING TRADE! Attempts: " + currentAttempts);
 
                             // Record statistics
                             VillagerReroller.getInstance().getStatisticsTracker().recordSuccessfulReroll(currentAttempts);
 
-                            // CRITICAL FIX: Close GUI immediately before stopping to prevent any further state transitions
-                            if (client.player != null) {
-                                client.player.closeHandledScreen();
+                            // Check if we should keep GUI open or close it
+                            if (config.isOpenGuiOnlyWhenMatched()) {
+                                // Keep GUI open so user can see and make the trade
+                                VillagerReroller.LOGGER.info("Keeping merchant GUI open for trading (openGuiOnlyWhenMatched=true)");
+                            } else {
+                                // Close GUI as before (original behavior)
+                                if (client.player != null) {
+                                    client.player.closeHandledScreen();
+                                    VillagerReroller.LOGGER.info("Closed merchant GUI");
+                                }
                             }
 
+                            // Stop the reroll process - this will NOT break the lectern
                             stopRerolling();
+                            VillagerReroller.LOGGER.info("Reroll process stopped successfully - lectern preserved");
                             return;
                         } else {
-                            VillagerReroller.LOGGER.info("No matching trades found, continuing reroll");
+                            VillagerReroller.LOGGER.info("No matching trades found this attempt, continuing reroll");
                         }
                     } else {
                         VillagerReroller.LOGGER.warn("Scanner returned empty trade list!");
@@ -613,14 +765,20 @@ public class RerollController {
                     stateActionStarted = true;
                 }
 
-                // Wait a moment before closing GUI (only if we didn't find a match)
-                if (timeSinceStateStart < 400) {
+                // If openGuiOnlyWhenMatched is enabled and no match was found, close GUI immediately
+                // Otherwise, wait a moment before closing GUI for visual feedback
+                long guiCloseDelay = config.isOpenGuiOnlyWhenMatched() ? 0 : 400;
+
+                if (timeSinceStateStart < guiCloseDelay) {
                     return;
                 }
 
                 // Close the GUI and continue rerolling
                 if (client.player != null) {
                     client.player.closeHandledScreen();
+                    if (config.isOpenGuiOnlyWhenMatched()) {
+                        VillagerReroller.LOGGER.debug("Quickly closed GUI (no match, openGuiOnlyWhenMatched=true)");
+                    }
                 }
 
                 VillagerReroller.LOGGER.info("Continuing to next reroll...");
@@ -634,12 +792,15 @@ public class RerollController {
             return null;
         }
 
+        ModConfig config = VillagerReroller.getInstance().getConfigManager().getConfig();
+        int searchReach = config.getJobSiteSearchReach();
+
         // Search for nearby job site blocks
         BlockPos villagerPos = currentVillager.getBlockPos();
 
-        for (int x = -8; x <= 8; x++) {
+        for (int x = -searchReach; x <= searchReach; x++) {
             for (int y = -3; y <= 3; y++) {
-                for (int z = -8; z <= 8; z++) {
+                for (int z = -searchReach; z <= searchReach; z++) {
                     BlockPos pos = villagerPos.add(x, y, z);
                     if (jobSiteHandler.isJobSiteBlock(pos)) {
                         return pos;
@@ -681,11 +842,14 @@ public class RerollController {
             return false;
         }
 
+        ModConfig config = VillagerReroller.getInstance().getConfigManager().getConfig();
+        double interactionReach = config.getInteractionReach();
+
         try {
             // Check distance to villager
             double distance = client.player.distanceTo(currentVillager);
-            if (distance > 4.5) {
-                VillagerReroller.LOGGER.warn("Villager is too far away: {} blocks", String.format("%.2f", distance));
+            if (distance > interactionReach) {
+                VillagerReroller.LOGGER.warn("Villager is too far away: {} blocks (max: {})", String.format("%.2f", distance), String.format("%.2f", interactionReach));
                 return false;
             }
 
@@ -740,31 +904,40 @@ public class RerollController {
 
     /**
      * Find a suitable position to place a workstation near the villager
+     * @param villagerPos The position of the villager
+     * @param maxRadius Maximum search radius (will search from radius 1 to maxRadius)
      */
-    private BlockPos findSuitablePlacementPosition(BlockPos villagerPos) {
+    private BlockPos findSuitablePlacementPosition(BlockPos villagerPos, int maxRadius) {
         if (client.world == null) {
             return null;
         }
 
+        VillagerReroller.LOGGER.debug("Searching for placement position from radius 1 to {} around {}", maxRadius, villagerPos);
+
         // Try positions in expanding circles around the villager
-        for (int radius = 1; radius <= 3; radius++) {
-            for (int x = -radius; x <= radius; x++) {
-                for (int z = -radius; z <= radius; z++) {
-                    // Only check perimeter of current radius
-                    if (Math.abs(x) != radius && Math.abs(z) != radius) {
-                        continue;
-                    }
+        for (int radius = 1; radius <= maxRadius; radius++) {
+            for (int y = 0; y <= 1; y++) { // Also check one block up
+                for (int x = -radius; x <= radius; x++) {
+                    for (int z = -radius; z <= radius; z++) {
+                        // Only check perimeter of current radius (for efficiency)
+                        if (y == 0 && Math.abs(x) != radius && Math.abs(z) != radius) {
+                            continue;
+                        }
 
-                    BlockPos testPos = villagerPos.add(x, 0, z);
+                        BlockPos testPos = villagerPos.add(x, y, z);
 
-                    // Check if this is a valid placement position
-                    if (jobSiteHandler.isValidPlacementPosition(testPos)) {
-                        return testPos;
+                        // Check if this is a valid placement position
+                        if (jobSiteHandler.isValidPlacementPosition(testPos)) {
+                            VillagerReroller.LOGGER.debug("Found valid placement position at {} (radius {}, y offset {})",
+                                testPos, radius, y);
+                            return testPos;
+                        }
                     }
                 }
             }
         }
 
+        VillagerReroller.LOGGER.debug("No valid placement position found within radius {}", maxRadius);
         return null;
     }
 
@@ -778,6 +951,35 @@ public class RerollController {
 
     public VillagerEntity getCurrentVillager() {
         return currentVillager;
+    }
+
+    /**
+     * Debug method to log detailed state information
+     * Useful for diagnosing "random stopping" issues
+     */
+    public void logDebugState() {
+        VillagerReroller.LOGGER.info("=== REROLL DEBUG STATE ===");
+        VillagerReroller.LOGGER.info("  isRunning: {}", isRunning);
+        VillagerReroller.LOGGER.info("  matchFound: {}", matchFound);
+        VillagerReroller.LOGGER.info("  emergencyStop: {}", emergencyStop);
+        VillagerReroller.LOGGER.info("  currentState: {}", currentState);
+        VillagerReroller.LOGGER.info("  timeSinceStateStart: {}ms", System.currentTimeMillis() - stateStartTime);
+        VillagerReroller.LOGGER.info("  currentAttempts: {}", currentAttempts);
+        VillagerReroller.LOGGER.info("  currentJobSite: {}", currentJobSite);
+        VillagerReroller.LOGGER.info("  currentVillager: {}", currentVillager != null ? "alive" : "null");
+        if (currentVillager != null) {
+            VillagerReroller.LOGGER.info("    - Position: {}", currentVillager.getBlockPos());
+            VillagerReroller.LOGGER.info("    - Profession: {}", currentVillager.getVillagerData().profession().getKey().orElse(null));
+            VillagerReroller.LOGGER.info("    - Is alive: {}", currentVillager.isAlive());
+            VillagerReroller.LOGGER.info("    - Is removed: {}", currentVillager.isRemoved());
+            if (client.player != null) {
+                VillagerReroller.LOGGER.info("    - Distance to player: {} blocks", String.format("%.2f", client.player.distanceTo(currentVillager)));
+            }
+        }
+        VillagerReroller.LOGGER.info("  jobSiteHandler.isBreaking: {}", jobSiteHandler.isBreaking());
+        VillagerReroller.LOGGER.info("  stateActionStarted: {}", stateActionStarted);
+        VillagerReroller.LOGGER.info("  placementRetries: {}", placementRetries);
+        VillagerReroller.LOGGER.info("=== END DEBUG STATE ===");
     }
 
     private static class VillagerState {

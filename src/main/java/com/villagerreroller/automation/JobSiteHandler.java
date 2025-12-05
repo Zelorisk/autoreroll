@@ -271,14 +271,32 @@ public class JobSiteHandler {
         }
 
         // Try original position first, then nearby positions if blocked
-        BlockPos[] positionsToTry = {
-            originalPos,                          // Original position
-            originalPos.add(1, 0, 0),            // East
-            originalPos.add(-1, 0, 0),           // West
-            originalPos.add(0, 0, 1),            // South
-            originalPos.add(0, 0, -1)            // North
-            // Removed diagonal positions to keep lecterns closer
-        };
+        // Build a comprehensive list of positions in expanding circles
+        java.util.List<BlockPos> positionsToTry = new java.util.ArrayList<>();
+        positionsToTry.add(originalPos); // Original position first
+
+        // Add positions in expanding radius (1, 2, then 3 blocks away)
+        for (int radius = 1; radius <= 3; radius++) {
+            // Cardinal directions
+            positionsToTry.add(originalPos.add(radius, 0, 0));   // East
+            positionsToTry.add(originalPos.add(-radius, 0, 0));  // West
+            positionsToTry.add(originalPos.add(0, 0, radius));   // South
+            positionsToTry.add(originalPos.add(0, 0, -radius));  // North
+
+            // Diagonal positions for better coverage
+            if (radius <= 2) { // Only check diagonals up to 2 blocks to keep workstation close
+                positionsToTry.add(originalPos.add(radius, 0, radius));    // SE
+                positionsToTry.add(originalPos.add(radius, 0, -radius));   // NE
+                positionsToTry.add(originalPos.add(-radius, 0, radius));   // SW
+                positionsToTry.add(originalPos.add(-radius, 0, -radius));  // NW
+            }
+        }
+
+        // Also try one block up if all ground-level positions fail
+        for (int i = 0; i < 5; i++) {
+            BlockPos groundPos = positionsToTry.get(i);
+            positionsToTry.add(groundPos.add(0, 1, 0));
+        }
 
         // Save current slot
         int originalSlot = player.getInventory().getSelectedSlot();
@@ -298,8 +316,8 @@ public class JobSiteHandler {
             VillagerReroller.LOGGER.debug("Selected hotbar slot {} with block {}", slot, block);
 
             // Try each position until one succeeds
-            for (int i = 0; i < positionsToTry.length; i++) {
-                BlockPos testPos = positionsToTry[i];
+            for (int i = 0; i < positionsToTry.size(); i++) {
+                BlockPos testPos = positionsToTry.get(i);
 
                 // Check if position is valid
                 if (!world.getBlockState(testPos).isAir()) {
@@ -357,7 +375,7 @@ public class JobSiteHandler {
             }
 
             // All positions failed
-            VillagerReroller.LOGGER.error("Failed to place block at any position (tried {} locations)", positionsToTry.length);
+            VillagerReroller.LOGGER.error("Failed to place block at any position (tried {} locations)", positionsToTry.size());
             player.getInventory().setSelectedSlot(originalSlot);
             return false;
 
