@@ -1,0 +1,779 @@
+package com.villagerreroller.automation;
+
+import com.villagerreroller.VillagerReroller;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.BlockState;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.multiplayer.MultiPlayerGameMode;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.Level;
+
+public class JobSiteHandler {
+
+    private final MinecraftClient client;
+    private final Map<BlockPos, Block> rememberedBlocks;
+    private BlockPos lastBrokenPos = null;
+    private long lastBreakTime = 0;
+    private ItemEntity droppedItem = null;
+
+    private BlockPos currentlyBreaking = null;
+    private long breakStartTime = 0;
+    private int breakingTickCount = 0;
+    private int originalHotbarSlot = -1;
+
+    private Vec3d lastPlayerPos = null;
+    private long lastProgressTime = 0;
+    private double lastDistanceToItem = Double.MAX_VALUE;
+    private int stuckTicks = 0;
+
+    private static final Block[] JOB_SITE_BLOCKS = {
+        Blocks.LECTERN,
+        Blocks.BLAST_FURNACE,
+        Blocks.SMOKER,
+        Blocks.CARTOGRAPHY_TABLE,
+        Blocks.BREWING_STAND,
+        Blocks.COMPOSTER,
+        Blocks.BARREL,
+        Blocks.FLETCHING_TABLE,
+        Blocks.CAULDRON,
+        Blocks.STONECUTTER,
+        Blocks.LOOM,
+        Blocks.SMITHING_TABLE,
+        Blocks.GRINDSTONE,
+    };
+
+    public JobSiteHandler() {
+        this.client = MinecraftClient.getInstance();
+        this.rememberedBlocks = new HashMap<>();
+    }
+
+    public boolean isJobSiteBlock(BlockPos pos) {
+        World world = client.world;
+        if (world == null) {
+            return false;
+        }
+
+        Block block = world.getBlockState(pos).getBlock();
+
+        for (Block jobSiteBlock : JOB_SITE_BLOCKS) {
+            if (block == jobSiteBlock) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public boolean startBreakingJobSite(BlockPos pos) {
+        ClientPlayerInteractionManager interactionManager =
+            client.interactionManager;
+        ClientPlayerEntity player = client.player;
+        World world = client.world;
+
+        if (interactionManager == null || player == null || world == null) {
+            VillagerReroller.LOGGER.warn(
+                "Cannot break job site - client not ready"
+            );
+            return false;
+        }
+
+        Block block = world.getBlockState(pos).getBlock();
+        rememberedBlocks.put(pos, block);
+
+        originalHotbarSlot = player.getInventory().getSelectedSlot();
+
+        int axeSlot = findAxeInHotbar();
+
+        if (axeSlot != -1) {
+            player.getInventory().setSelectedSlot(axeSlot);
+            VillagerReroller.LOGGER.info(
+                "Equipped axe from slot {} to break block faster (original: {})",
+                axeSlot,
+                originalHotbarSlot
+            );
+        } else {
+            VillagerReroller.LOGGER.warn(
+                "No axe found in hotbar, breaking with current tool"
+            );
+        }
+
+        try {
+            interactionManager.attackBlock(pos, Direction.UP);
+
+            currentlyBreaking = pos;
+            breakStartTime = System.currentTimeMillis();
+            breakingTickCount = 0;
+
+            VillagerReroller.LOGGER.info(
+                "Started breaking job site block at {}: {}",
+                pos,
+                block
+            );
+            return true;
+        } catch (Exception e) {
+            VillagerReroller.LOGGER.error(
+                "Failed to start breaking job site block",
+                e
+            );
+            restoreOriginalHotbarSlot();
+            return false;
+        }
+    }
+
+    public boolean continueBreaking() {
+        ClientPlayerInteractionManager interactionManager =
+            client.interactionManager;
+        ClientPlayerEntity player = client.player;
+        World world = client.world;
+
+        if (
+            currentlyBreaking == null ||
+            interactionManager == null ||
+            player == null ||
+            world == null
+        ) {
+            return false;
+        }
+
+        BlockState state = world.getBlockState(currentlyBreaking);
+
+        if (state.isAir()) {
+            VillagerReroller.LOGGER.info(
+                "Block broken successfully after {} ticks",
+                breakingTickCount
+            );
+            lastBrokenPos = currentlyBreaking;
+            lastBreakTime = System.currentTimeMillis();
+            currentlyBreaking = null;
+            breakingTickCount = 0;
+            restoreOriginalHotbarSlot();
+            return true;
+        }
+
+        try {
+            interactionManager.updateBlockBreakingProgress(
+                currentlyBreaking,
+                Direction.UP
+            );
+            breakingTickCount++;
+
+            if (breakingTickCount > 100) {
+                VillagerReroller.LOGGER.error(
+                    "Breaking timed out after 100 ticks, forcing break"
+                );
+                interactionManager.attackBlock(currentlyBreaking, Direction.UP);
+                currentlyBreaking = null;
+                restoreOriginalHotbarSlot();
+                return false;
+            }
+
+            return false;
+        } catch (Exception e) {
+            VillagerReroller.LOGGER.error(
+                "Failed to continue breaking block",
+                e
+            );
+            currentlyBreaking = null;
+            restoreOriginalHotbarSlot();
+            return false;
+        }
+    }
+
+    public void cancelBreaking() {
+        if (currentlyBreaking != null) {
+            ClientPlayerInteractionManager interactionManager =
+                client.interactionManager;
+            if (interactionManager != null) {
+                interactionManager.cancelBlockBreaking();
+            }
+            currentlyBreaking = null;
+            breakingTickCount = 0;
+            restoreOriginalHotbarSlot();
+        }
+    }
+
+    private void restoreOriginalHotbarSlot() {
+        if (
+            originalHotbarSlot >= 0 &&
+            originalHotbarSlot < 9 &&
+            client.player != null
+        ) {
+            client.player.getInventory().setSelectedSlot(originalHotbarSlot);
+            VillagerReroller.LOGGER.debug(
+                "Restored original hotbar slot: {}",
+                originalHotbarSlot
+            );
+            originalHotbarSlot = -1;
+        }
+    }
+
+    public boolean isBreaking() {
+        return currentlyBreaking != null;
+    }
+
+    private int findAxeInHotbar() {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return -1;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.getItem() instanceof AxeItem) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    public boolean replaceJobSite(BlockPos originalPos) {
+        ClientPlayerInteractionManager interactionManager =
+            client.interactionManager;
+        ClientPlayerEntity player = client.player;
+        World world = client.world;
+
+        if (interactionManager == null || player == null || world == null) {
+            VillagerReroller.LOGGER.warn(
+                "Cannot replace job site - client not ready"
+            );
+            return false;
+        }
+
+        Block block = rememberedBlocks.get(originalPos);
+        if (block == null) {
+            VillagerReroller.LOGGER.warn(
+                "No remembered block type for position {}",
+                originalPos
+            );
+            return false;
+        }
+
+        int slot = findBlockInInventory(block);
+        if (slot == -1) {
+            VillagerReroller.LOGGER.warn(
+                "Block {} not found in inventory",
+                block
+            );
+            return false;
+        }
+
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                BlockPos checkPos = originalPos.add(x, 0, z);
+                if (!checkPos.equals(originalPos) && isJobSiteBlock(checkPos)) {
+                    VillagerReroller.LOGGER.info(
+                        "Found old job site at {}, breaking it to avoid villager confusion",
+                        checkPos
+                    );
+                    if (interactionManager != null) {
+                        interactionManager.attackBlock(checkPos, Direction.UP);
+                        try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException e) {}
+                    }
+                }
+            }
+        }
+
+        java.util.List<BlockPos> positionsToTry = new java.util.ArrayList<>();
+        positionsToTry.add(originalPos);
+
+        for (int radius = 1; radius <= 3; radius++) {
+            positionsToTry.add(originalPos.add(radius, 0, 0));
+            positionsToTry.add(originalPos.add(-radius, 0, 0));
+            positionsToTry.add(originalPos.add(0, 0, radius));
+            positionsToTry.add(originalPos.add(0, 0, -radius));
+
+            if (radius <= 2) {
+                positionsToTry.add(originalPos.add(radius, 0, radius));
+                positionsToTry.add(originalPos.add(radius, 0, -radius));
+                positionsToTry.add(originalPos.add(-radius, 0, radius));
+                positionsToTry.add(originalPos.add(-radius, 0, -radius));
+            }
+        }
+
+        for (int i = 0; i < 5; i++) {
+            BlockPos groundPos = positionsToTry.get(i);
+            positionsToTry.add(groundPos.add(0, 1, 0));
+        }
+
+        int originalSlot = player.getInventory().getSelectedSlot();
+
+        try {
+            if (slot >= 9) {
+                VillagerReroller.LOGGER.info(
+                    "Moving block from slot {} to hotbar",
+                    slot
+                );
+                player.getInventory().setSelectedSlot(0);
+                interactionManager.clickSlot(
+                    player.playerScreenHandler.syncId,
+                    slot,
+                    0,
+                    net.minecraft.world.inventory.ClickType.SWAP,
+                    player
+                );
+                slot = 0;
+            }
+
+            player.getInventory().setSelectedSlot(slot);
+            VillagerReroller.LOGGER.debug(
+                "Selected hotbar slot {} with block {}",
+                slot,
+                block
+            );
+
+            for (int i = 0; i < positionsToTry.size(); i++) {
+                BlockPos testPos = positionsToTry.get(i);
+
+                if (!world.getBlockState(testPos).isAir()) {
+                    if (i == 0) {
+                        VillagerReroller.LOGGER.warn(
+                            "Original position {} is not air, trying alternatives...",
+                            testPos
+                        );
+                    }
+                    continue;
+                }
+
+                Box checkBox = new Box(testPos);
+                List<Entity> blockingEntities = world.getOtherEntities(
+                    null,
+                    checkBox
+                );
+                if (!blockingEntities.isEmpty()) {
+                    VillagerReroller.LOGGER.debug(
+                        "Position {} blocked by {} entities, trying next...",
+                        testPos,
+                        blockingEntities.size()
+                    );
+                    continue;
+                }
+
+                VillagerReroller.LOGGER.info(
+                    "Attempting to place block at {} (position {})",
+                    testPos,
+                    i == 0 ? "original" : "alternative " + i
+                );
+
+                BlockHitResult hitResult = new BlockHitResult(
+                    Vec3d.ofCenter(testPos),
+                    Direction.UP,
+                    testPos.down(),
+                    false
+                );
+
+                interactionManager.interactBlock(
+                    player,
+                    Hand.MAIN_HAND,
+                    hitResult
+                );
+
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {}
+
+                if (isJobSiteBlock(testPos)) {
+                    VillagerReroller.LOGGER.info(
+                        "✓ Successfully placed job site block at {}: {}",
+                        testPos,
+                        block
+                    );
+
+                    if (!testPos.equals(originalPos)) {
+                        VillagerReroller.LOGGER.info(
+                            "Updated job site position from {} to {}",
+                            originalPos,
+                            testPos
+                        );
+                        rememberedBlocks.remove(originalPos);
+                        rememberedBlocks.put(testPos, block);
+                        lastBrokenPos = testPos;
+                    }
+
+                    player.getInventory().setSelectedSlot(originalSlot);
+                    return true;
+                } else {
+                    VillagerReroller.LOGGER.warn(
+                        "Placement at {} reported success but block not found, trying next position...",
+                        testPos
+                    );
+                }
+            }
+
+            VillagerReroller.LOGGER.error(
+                "Failed to place block at any position (tried {} locations)",
+                positionsToTry.size()
+            );
+            player.getInventory().setSelectedSlot(originalSlot);
+            return false;
+        } catch (Exception e) {
+            VillagerReroller.LOGGER.error(
+                "Exception during block placement",
+                e
+            );
+            player.getInventory().setSelectedSlot(originalSlot);
+            return false;
+        }
+    }
+
+    private int findBlockInInventory(Block block) {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return -1;
+        }
+
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            if (
+                Block.getBlockFromItem(
+                    player.getInventory().getStack(i).getItem()
+                ) ==
+                block
+            ) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    public boolean placeInitialJobSite(BlockPos pos) {
+        ClientPlayerInteractionManager interactionManager =
+            client.interactionManager;
+        ClientPlayerEntity player = client.player;
+        World world = client.world;
+
+        if (interactionManager == null || player == null || world == null) {
+            VillagerReroller.LOGGER.warn(
+                "Cannot place initial job site - client not ready"
+            );
+            return false;
+        }
+
+        int slot = -1;
+        Block foundBlock = null;
+
+        for (Block jobSiteBlock : JOB_SITE_BLOCKS) {
+            slot = findBlockInInventory(jobSiteBlock);
+            if (slot != -1) {
+                foundBlock = jobSiteBlock;
+                break;
+            }
+        }
+
+        if (slot == -1 || foundBlock == null) {
+            VillagerReroller.LOGGER.warn(
+                "No workstation blocks found in inventory"
+            );
+            return false;
+        }
+
+        rememberedBlocks.put(pos, foundBlock);
+
+        int originalSlot = player.getInventory().getSelectedSlot();
+
+        try {
+            if (slot >= 9) {
+                player.getInventory().setSelectedSlot(0);
+                interactionManager.clickSlot(
+                    player.playerScreenHandler.syncId,
+                    slot,
+                    0,
+                    net.minecraft.world.inventory.ClickType.SWAP,
+                    player
+                );
+                slot = 0;
+            }
+
+            player.getInventory().setSelectedSlot(slot);
+
+            BlockHitResult hitResult = new BlockHitResult(
+                Vec3d.ofCenter(pos),
+                Direction.UP,
+                pos.down(),
+                false
+            );
+
+            interactionManager.interactBlock(player, Hand.MAIN_HAND, hitResult);
+
+            VillagerReroller.LOGGER.info(
+                "Placed initial workstation at {}: {}",
+                pos,
+                foundBlock
+            );
+
+            player.getInventory().setSelectedSlot(originalSlot);
+
+            return true;
+        } catch (Exception e) {
+            VillagerReroller.LOGGER.error(
+                "Failed to place initial workstation",
+                e
+            );
+            player.getInventory().setSelectedSlot(originalSlot);
+            return false;
+        }
+    }
+
+    public int tryPickupItem() {
+        ClientPlayerEntity player = client.player;
+        World world = client.world;
+
+        if (player == null || world == null || lastBrokenPos == null) {
+            VillagerReroller.LOGGER.warn(
+                "Cannot check item pickup - missing client/world/position"
+            );
+            resetPickupState();
+            return -1;
+        }
+
+        Block expectedBlock = rememberedBlocks.get(lastBrokenPos);
+        if (expectedBlock == null) {
+            VillagerReroller.LOGGER.warn(
+                "No remembered block for position {}",
+                lastBrokenPos
+            );
+            resetPickupState();
+            return 1;
+        }
+
+        if (findBlockInInventory(expectedBlock) != -1) {
+            VillagerReroller.LOGGER.debug(
+                "Item confirmed in inventory - pickup successful"
+            );
+            resetPickupState();
+            return 1;
+        }
+
+        Box searchBox = new Box(lastBrokenPos).expand(10.0);
+        List<ItemEntity> items = world.getEntitiesByClass(
+            ItemEntity.class,
+            searchBox,
+            item ->
+                Block.getBlockFromItem(item.getStack().getItem()) ==
+                expectedBlock
+        );
+
+        if (items.isEmpty()) {
+            VillagerReroller.LOGGER.debug(
+                "No dropped items found, assuming picked up or creative mode"
+            );
+            resetPickupState();
+            return 1;
+        }
+
+        ItemEntity closestItem = null;
+        double closestDist = Double.MAX_VALUE;
+
+        for (ItemEntity item : items) {
+            double dist = player.squaredDistanceTo(item);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestItem = item;
+            }
+        }
+
+        if (closestItem != null) {
+            double distance = Math.sqrt(closestDist);
+            Vec3d itemPos = closestItem.position();
+            Vec3d playerPos = player.position();
+
+            if (lastPlayerPos == null) {
+                lastPlayerPos = playerPos;
+                lastProgressTime = System.currentTimeMillis();
+                lastDistanceToItem = distance;
+                stuckTicks = 0;
+            }
+
+            double playerMovement = playerPos.distanceTo(lastPlayerPos);
+            boolean madeProgress = distance < lastDistanceToItem - 0.1;
+
+            if (System.currentTimeMillis() - lastProgressTime > 500) {
+                if (!madeProgress && playerMovement < 0.1) {
+                    stuckTicks++;
+                    VillagerReroller.LOGGER.debug(
+                        "Player appears stuck (stuck ticks: {}), distance: {}",
+                        stuckTicks,
+                        String.format("%.2f", distance)
+                    );
+                } else {
+                    stuckTicks = 0;
+                }
+
+                lastPlayerPos = playerPos;
+                lastDistanceToItem = distance;
+                lastProgressTime = System.currentTimeMillis();
+            }
+
+            Vec3d eyePos = playerPos.add(
+                0,
+                player.getEyeHeight(player.getPose()),
+                0
+            );
+
+            double deltaX = itemPos.x - eyePos.x;
+            double deltaY = itemPos.y - eyePos.y;
+            double deltaZ = itemPos.z - eyePos.z;
+
+            double horizontalDist = Math.sqrt(
+                deltaX * deltaX + deltaZ * deltaZ
+            );
+            float yaw =
+                (float) (Math.atan2(deltaZ, deltaX) * (180.0 / Math.PI)) -
+                90.0f;
+            float pitch = (float) -(Math.atan2(deltaY, horizontalDist) *
+                (180.0 / Math.PI));
+
+            player.setYaw(yaw);
+            player.setPitch(pitch);
+
+            if (distance <= 1.8) {
+                if (distance > 0.5) {
+                    VillagerReroller.LOGGER.debug(
+                        "Item is {} blocks away, moving closer for pickup...",
+                        String.format("%.2f", distance)
+                    );
+                    movePlayerTowards(player, itemPos, 0.15, stuckTicks >= 2);
+                } else {
+                    VillagerReroller.LOGGER.debug(
+                        "Item is {} blocks away, waiting for automatic pickup...",
+                        String.format("%.2f", distance)
+                    );
+                }
+                return 0;
+            } else if (distance <= 10.0) {
+                VillagerReroller.LOGGER.debug(
+                    "Item is {} blocks away, moving towards it... (stuck: {})",
+                    String.format("%.2f", distance),
+                    stuckTicks
+                );
+
+                movePlayerTowards(player, itemPos, 0.2, stuckTicks >= 2);
+
+                if (stuckTicks >= 2) {
+                    stuckTicks = 0;
+                }
+
+                return 0;
+            } else {
+                VillagerReroller.LOGGER.warn(
+                    "Item is {} blocks away - very far from expected position!",
+                    String.format("%.2f", distance)
+                );
+
+                movePlayerTowards(player, itemPos, 0.15, stuckTicks >= 2);
+
+                if (stuckTicks >= 2) {
+                    stuckTicks = 0;
+                }
+
+                return 0;
+            }
+        }
+
+        resetPickupState();
+        return 1;
+    }
+
+    public void resetPickupState() {
+        lastPlayerPos = null;
+        lastProgressTime = 0;
+        lastDistanceToItem = Double.MAX_VALUE;
+        stuckTicks = 0;
+    }
+
+    public void clearMovementInput() {}
+
+    private void movePlayerTowards(
+        ClientPlayerEntity player,
+        Vec3d targetPos,
+        double speed,
+        boolean shouldJump
+    ) {
+        Vec3d playerPos = player.position();
+        Vec3d direction = targetPos.subtract(playerPos).normalize();
+
+        Vec3d targetVelocity = direction.multiply(speed, 0, speed);
+
+        if (shouldJump && player.isOnGround()) {
+            VillagerReroller.LOGGER.info(
+                "Player stuck, attempting to jump over obstacle"
+            );
+            player.setVelocity(targetVelocity.x, 0.42, targetVelocity.z);
+        } else {
+            player.setVelocity(
+                targetVelocity.x,
+                player.getVelocity().y,
+                targetVelocity.z
+            );
+        }
+
+        if (player.isOnGround() && !shouldJump) {
+            Vec3d nudge = direction.multiply(0.02, 0, 0.02);
+            player.setPosition(
+                player.getX() + nudge.x,
+                player.getY(),
+                player.getZ() + nudge.z
+            );
+        }
+    }
+
+    public boolean isValidPlacementPosition(BlockPos pos) {
+        World world = client.world;
+        if (world == null) {
+            return false;
+        }
+
+        if (!world.getBlockState(pos.down()).isSolidBlock(world, pos.down())) {
+            return false;
+        }
+
+        if (!world.getBlockState(pos).isAir()) {
+            return false;
+        }
+
+        Box checkBox = new Box(pos);
+        List<Entity> entities = world.getOtherEntities(null, checkBox);
+
+        return entities.isEmpty();
+    }
+
+    public boolean hasWorkstationInInventory() {
+        ClientPlayerEntity player = client.player;
+        if (player == null) {
+            return false;
+        }
+
+        for (Block jobSiteBlock : JOB_SITE_BLOCKS) {
+            if (findBlockInInventory(jobSiteBlock) != -1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public Block getRememberedBlock(BlockPos pos) {
+        return rememberedBlocks.get(pos);
+    }
+
+    public void clearRememberedBlocks() {
+        rememberedBlocks.clear();
+    }
+}

@@ -7,10 +7,13 @@ import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 
 public class NotificationHelper {
+
     private static final MinecraftClient client = MinecraftClient.getInstance();
 
     public static void sendMessage(String message) {
-        ModConfig config = VillagerReroller.getInstance().getConfigManager().getConfig();
+        ModConfig config = VillagerReroller.getInstance()
+            .getConfigManager()
+            .getConfig();
 
         switch (config.getNotificationStyle()) {
             case CHAT -> sendChatMessage(message);
@@ -21,7 +24,10 @@ public class NotificationHelper {
 
     public static void sendChatMessage(String message) {
         if (client.player != null) {
-            client.player.sendMessage(Text.literal("§6[VTR]§r " + message), false);
+            client.player.sendMessage(
+                Text.literal("§6[VTR]§r " + message),
+                false
+            );
         }
     }
 
@@ -32,21 +38,27 @@ public class NotificationHelper {
     }
 
     public static void sendOverlay(String message) {
-        // Overlay messages are handled by OverlayRenderer
-        // For now, fall back to action bar
         sendActionBar(message);
     }
 
     public static void playSuccessSound() {
-        ModConfig config = VillagerReroller.getInstance().getConfigManager().getConfig();
+        ModConfig config = VillagerReroller.getInstance()
+            .getConfigManager()
+            .getConfig();
 
         if (config.isSoundNotifications() && client.player != null) {
-            client.player.playSound(SoundEvents.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+            client.player.playSound(
+                SoundEvents.ENTITY_PLAYER_LEVELUP,
+                1.0f,
+                1.0f
+            );
         }
     }
 
     public static void playErrorSound() {
-        ModConfig config = VillagerReroller.getInstance().getConfigManager().getConfig();
+        ModConfig config = VillagerReroller.getInstance()
+            .getConfigManager()
+            .getConfig();
 
         if (config.isSoundNotifications() && client.player != null) {
             client.player.playSound(SoundEvents.ENTITY_VILLAGER_NO, 1.0f, 1.0f);
@@ -55,13 +67,25 @@ public class NotificationHelper {
 
     public static void playClickSound() {
         if (client.player != null) {
-            client.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.5f, 1.0f);
+            client.player.playSound(
+                SoundEvents.UI_BUTTON_CLICK.value(),
+                0.5f,
+                1.0f
+            );
         }
     }
 
-    public static void sendTradeFoundNotification(String itemName, int emeraldCost, int attempts) {
-        String message = String.format("§aFound: §f%s §7for §f%d emeralds §7(§f%d §7attempts)",
-                itemName, emeraldCost, attempts);
+    public static void sendTradeFoundNotification(
+        String itemName,
+        int emeraldCost,
+        int attempts
+    ) {
+        String message = String.format(
+            "§aFound: §f%s §7for §f%d emeralds §7(§f%d §7attempts)",
+            itemName,
+            emeraldCost,
+            attempts
+        );
         sendMessage(message);
         playSuccessSound();
     }
@@ -80,5 +104,9 @@ public class NotificationHelper {
     public static void sendInfoNotification(String info) {
         String message = "§7" + info;
         sendMessage(message);
+    }
+
+    public static void displayClientMessage(String message) {
+        sendChatMessage(message);
     }
 }

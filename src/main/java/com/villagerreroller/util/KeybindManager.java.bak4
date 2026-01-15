@@ -1,0 +1,176 @@
+package com.villagerreroller.util;
+
+import com.mojang.blaze3d.platform.InputConstants;
+import com.villagerreroller.VillagerReroller;
+import com.villagerreroller.automation.RerollController;
+import com.villagerreroller.config.ModConfig;
+import java.util.Optional;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.npc.Villager;
+import org.lwjgl.glfw.GLFW;
+
+public class KeybindManager {
+
+    private static final String CATEGORY = "key.categories.villagerreroller";
+
+    private KeyMapping toggleModKey;
+    private KeyMapping emergencyStopKey;
+    private KeyMapping manualRerollKey;
+    private KeyMapping cycleProfileKey;
+    private VillagerDetector villagerDetector;
+
+    public void register() {
+        villagerDetector = new VillagerDetector();
+
+        toggleModKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping(
+                "key.villagerreroller.toggle",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_R,
+                CATEGORY
+            )
+        );
+
+        emergencyStopKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping(
+                "key.villagerreroller.emergency_stop",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_ESCAPE,
+                CATEGORY
+            )
+        );
+
+        manualRerollKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping(
+                "key.villagerreroller.manual_reroll",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_G,
+                CATEGORY
+            )
+        );
+
+        cycleProfileKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping(
+                "key.villagerreroller.cycle_profile",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_P,
+                CATEGORY
+            )
+        );
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            handleKeyPresses();
+        });
+
+        VillagerReroller.LOGGER.info("Registered keybindings");
+    }
+
+    private void handleKeyPresses() {
+        while (toggleModKey.wasPressed()) {
+            toggleMod();
+        }
+
+        while (emergencyStopKey.wasPressed()) {
+            emergencyStop();
+        }
+
+        while (manualRerollKey.wasPressed()) {
+            manualReroll();
+        }
+
+        while (cycleProfileKey.wasPressed()) {
+            cycleProfile();
+        }
+    }
+
+    private void toggleMod() {
+        ModConfig config = VillagerReroller.getInstance()
+            .getConfigManager()
+            .getConfig();
+        boolean newState = !config.isEnabled();
+        config.setEnabled(newState);
+        VillagerReroller.getInstance().getConfigManager().save();
+
+        NotificationHelper.sendMessage(
+            newState ? "Mod enabled" : "Mod disabled"
+        );
+        VillagerReroller.LOGGER.info("Mod toggled: {}", newState);
+    }
+
+    private void emergencyStop() {
+        RerollController controller =
+            VillagerReroller.getInstance().getRerollController();
+        if (controller.isRunning()) {
+            controller.emergencyStop();
+        }
+    }
+
+    private void manualReroll() {
+        ModConfig config = VillagerReroller.getInstance()
+            .getConfigManager()
+            .getConfig();
+        RerollController controller =
+            VillagerReroller.getInstance().getRerollController();
+
+        if (!config.isEnabled()) {
+            NotificationHelper.sendMessage(
+                "Mod is disabled! Press R to enable."
+            );
+            return;
+        }
+
+        if (controller.isRunning()) {
+            controller.stopRerolling();
+            NotificationHelper.sendMessage("Stopped rerolling");
+            return;
+        }
+
+        Optional<Villager> villagerOpt =
+            villagerDetector.getBestVillagerToReroll();
+
+        if (villagerOpt.isEmpty()) {
+            NotificationHelper.sendMessage(
+                "No villager found nearby! Look at or get closer to a villager."
+            );
+            VillagerReroller.LOGGER.warn("No villager found for manual reroll");
+            return;
+        }
+
+        Villager villager = villagerOpt.get();
+
+        if (villager.isBaby()) {
+            NotificationHelper.sendMessage("Cannot reroll baby villagers!");
+            return;
+        }
+
+        controller.startRerolling(villager);
+        VillagerReroller.LOGGER.info(
+            "Manual reroll started for villager at {}",
+            villager.blockPosition()
+        );
+    }
+
+    private void cycleProfile() {
+        NotificationHelper.sendMessage("Profile cycling not yet implemented");
+        VillagerReroller.LOGGER.info("Profile cycle requested");
+    }
+
+    public KeyMapping getToggleModKey() {
+        return toggleModKey;
+    }
+
+    public KeyMapping getEmergencyStopKey() {
+        return emergencyStopKey;
+    }
+
+    public KeyMapping getManualRerollKey() {
+        return manualRerollKey;
+    }
+
+    public KeyMapping getCycleProfileKey() {
+        return cycleProfileKey;
+    }
+}

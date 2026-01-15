@@ -1,0 +1,108 @@
+package com.villagerreroller.util;
+
+import java.util.List;
+import java.util.Optional;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
+
+public class VillagerDetector {
+
+    private static final double MAX_DETECTION_DISTANCE = 10.0;
+    private static final double NEARBY_RADIUS = 5.0;
+
+    private final Minecraft client;
+
+    public VillagerDetector() {
+        this.client = Minecraft.getInstance();
+    }
+
+    public Optional<Villager> getTargetedVillager() {
+        if (client.player == null || client.level == null) {
+            return Optional.empty();
+        }
+
+        HitResult hitResult = client.hitResult;
+
+        if (hitResult != null && hitResult.getType() == HitResult.Type.ENTITY) {
+            EntityHitResult entityHitResult = (EntityHitResult) hitResult;
+            Entity entity = entityHitResult.getEntity();
+
+            if (entity instanceof Villager villager) {
+                return Optional.of(villager);
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public Optional<Villager> getNearestVillager() {
+        if (client.player == null || client.level == null) {
+            return Optional.empty();
+        }
+
+        Level world = client.level;
+        AABB searchBox = client.player
+            .getBoundingBox()
+            .inflate(MAX_DETECTION_DISTANCE);
+
+        List<Villager> nearbyVillagers = world.getEntitiesOfClass(
+            Villager.class,
+            searchBox,
+            villager -> villager.isAlive() && !villager.isBaby()
+        );
+
+        if (nearbyVillagers.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Villager closest = null;
+        double closestDistance = Double.MAX_VALUE;
+
+        for (Villager villager : nearbyVillagers) {
+            double distance = client.player.distanceTo(villager);
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closest = villager;
+            }
+        }
+
+        return Optional.ofNullable(closest);
+    }
+
+    public List<Villager> getNearbyVillagers(double radius) {
+        if (client.player == null || client.level == null) {
+            return List.of();
+        }
+
+        Level world = client.level;
+        AABB searchBox = client.player.getBoundingBox().inflate(radius);
+
+        return world.getEntitiesOfClass(
+            Villager.class,
+            searchBox,
+            villager -> villager.isAlive() && !villager.isBaby()
+        );
+    }
+
+    public List<Villager> getNearbyVillagers() {
+        return getNearbyVillagers(NEARBY_RADIUS);
+    }
+
+    public Optional<Villager> getBestVillagerToReroll() {
+        Optional<Villager> targeted = getTargetedVillager();
+        if (targeted.isPresent()) {
+            return targeted;
+        }
+
+        return getNearestVillager();
+    }
+
+    public boolean hasVillagerInRange() {
+        return getBestVillagerToReroll().isPresent();
+    }
+}
