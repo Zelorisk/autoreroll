@@ -1,37 +1,29 @@
 {
-	"schemaVersion": 1,
-	"id": "villagerreroller",
-	"version": "${version}",
-	"name": "Villager Trade Reroller",
-	"description": "Automates and optimizes villager trading by intelligently rerolling trades until desired conditions are met.",
-	"authors": [
-		"Your Name"
-	],
-	"contact": {
-		"homepage": "https://github.com/yourusername/villager-trade-reroller",
-		"sources": "https://github.com/yourusername/villager-trade-reroller"
-	},
-	"license": "MIT",
-	"icon": "assets/villagerreroller/icon.png",
-	"environment": "client",
-	"entrypoints": {
-		"client": [
-			"com.villagerreroller.VillagerReroller"
-		],
-		"modmenu": [
-			"com.villagerreroller.ui.ModMenuIntegration"
-		]
-	},
-	"mixins": [
-		"villagerreroller.mixins.json"
-	],
-	"depends": {
-		"fabricloader": ">=${loader_version}",
-		"minecraft": ">=1.21.3 <=1.21.8",
-		"java": ">=21",
-		"fabric-api": "*"
-	},
-	"suggests": {
-		"modmenu": "*"
-	}
+  "schemaVersion": 1,
+  "id": "villagerreroller",
+  "version": "${version}",
+  "name": "Villager Trade Reroller",
+  "description": "Automates and optimizes villager trading by intelligently rerolling trades until desired conditions are met.",
+  "authors": ["Your Name"],
+  "contact": {
+    "homepage": "https://github.com/yourusername/villager-trade-reroller",
+    "sources": "https://github.com/yourusername/villager-trade-reroller"
+  },
+  "license": "MIT",
+  "icon": "assets/villagerreroller/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.villagerreroller.VillagerReroller"],
+    "modmenu": ["com.villagerreroller.ui.ModMenuIntegration"]
+  },
+  "mixins": ["villagerreroller.mixins.json"],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "modmenu": "*"
+  }
 }

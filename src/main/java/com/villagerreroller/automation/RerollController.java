@@ -767,14 +767,16 @@ public class RerollController {
                 boolean hasNoProfession = currentVillager
                     .getVillagerData()
                     .profession()
+                    .value()
                     .equals(net.minecraft.village.VillagerProfession.NONE);
                 VillagerReroller.LOGGER.debug(
                     "Checking villager profession: {}",
                     currentVillager
                         .getVillagerData()
                         .profession()
-                        .getKey()
-                        .orElse(null)
+                        .value()
+                        .id()
+                        .getString()
                 );
 
                 if (hasNoProfession) {
@@ -800,8 +802,9 @@ public class RerollController {
                     currentVillager
                         .getVillagerData()
                         .profession()
-                        .getKey()
-                        .orElse(null)
+                        .value()
+                        .id()
+                        .getString()
                 );
                 transitionToState(RerollState.OPENING_TRADES);
                 break;
@@ -810,6 +813,7 @@ public class RerollController {
                     currentVillager
                         .getVillagerData()
                         .profession()
+                        .value()
                         .equals(net.minecraft.village.VillagerProfession.NONE)
                 ) {
                     VillagerReroller.LOGGER.error(
@@ -1092,8 +1096,17 @@ public class RerollController {
             }
 
             net.minecraft.util.math.Vec3d villagerPos =
-                currentVillager.getPos();
-            net.minecraft.util.math.Vec3d playerPos = client.player.getPos();
+                new net.minecraft.util.math.Vec3d(
+                    currentVillager.getX(),
+                    currentVillager.getY(),
+                    currentVillager.getZ()
+                );
+            net.minecraft.util.math.Vec3d playerPos =
+                new net.minecraft.util.math.Vec3d(
+                    client.player.getX(),
+                    client.player.getY(),
+                    client.player.getZ()
+                );
             net.minecraft.util.math.Vec3d eyePos = playerPos.add(
                 0,
                 client.player.getEyeHeight(client.player.getPose()),
@@ -1236,16 +1249,19 @@ public class RerollController {
         );
         if (currentVillager != null) {
             VillagerReroller.LOGGER.info(
-                "    - Position: {}",
-                currentVillager.getPos()
+                "    - Position: {},{},{}",
+                currentVillager.getX(),
+                currentVillager.getY(),
+                currentVillager.getZ()
             );
             VillagerReroller.LOGGER.info(
                 "    - Profession: {}",
                 currentVillager
                     .getVillagerData()
                     .profession()
-                    .getKey()
-                    .orElse(null)
+                    .value()
+                    .id()
+                    .getString()
             );
             VillagerReroller.LOGGER.info(
                 "    - Is alive: {}",

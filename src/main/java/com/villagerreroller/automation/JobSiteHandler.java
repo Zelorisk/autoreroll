@@ -591,8 +591,16 @@ public class JobSiteHandler {
 
         if (closestItem != null) {
             double distance = Math.sqrt(closestDist);
-            Vec3d itemPos = closestItem.getPos();
-            Vec3d playerPos = player.getPos();
+            Vec3d itemPos = new Vec3d(
+                closestItem.getX(),
+                closestItem.getY(),
+                closestItem.getZ()
+            );
+            Vec3d playerPos = new Vec3d(
+                player.getX(),
+                player.getY(),
+                player.getZ()
+            );
 
             if (lastPlayerPos == null) {
                 lastPlayerPos = playerPos;
@@ -706,7 +714,11 @@ public class JobSiteHandler {
         double speed,
         boolean shouldJump
     ) {
-        Vec3d playerPos = player.getPos();
+        Vec3d playerPos = new Vec3d(
+            player.getX(),
+            player.getY(),
+            player.getZ()
+        );
         Vec3d direction = targetPos.subtract(playerPos).normalize();
 
         Vec3d targetVelocity = direction.multiply(speed, 0, speed);

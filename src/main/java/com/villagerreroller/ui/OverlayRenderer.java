@@ -65,6 +65,8 @@ public class OverlayRenderer {
             VillagerReroller.getInstance().getRerollController();
         TextRenderer textRenderer = client.textRenderer;
 
+        renderTradingStatusBar(context, textRenderer, controller);
+
         renderMainOverlay(context, textRenderer, config, controller);
 
         if (
@@ -241,8 +243,33 @@ public class OverlayRenderer {
         int height
     ) {
         int glowColor = (COLOR_BORDER & 0x00FFFFFF) | 0x40000000;
-        context.drawBorder(x - 1, y - 1, width + 2, height + 2, glowColor);
-        context.drawBorder(x, y, width, height, COLOR_BORDER);
+        context.fill(x - 2, y - 2, x + width + 2, y - 1, glowColor);
+        context.fill(
+            x - 2,
+            y + height + 1,
+            x + width + 2,
+            y + height + 2,
+            glowColor
+        );
+        context.fill(x - 2, y - 1, x - 1, y + height + 1, glowColor);
+        context.fill(
+            x + width + 1,
+            y - 1,
+            x + width + 2,
+            y + height + 1,
+            glowColor
+        );
+
+        context.fill(x - 1, y - 1, x + width + 1, y, COLOR_BORDER);
+        context.fill(
+            x - 1,
+            y + height,
+            x + width + 1,
+            y + height + 1,
+            COLOR_BORDER
+        );
+        context.fill(x - 1, y, x, y + height, COLOR_BORDER);
+        context.fill(x + width, y, x + width + 1, y + height, COLOR_BORDER);
     }
 
     private void renderTradeQuality(
@@ -301,7 +328,16 @@ public class OverlayRenderer {
             context.fill(x, y, x + progressWidth, y + 1, highlightColor);
         }
 
-        context.drawBorder(x, y, x + width, y + height, COLOR_BORDER);
+        context.fill(x, y, x + width, y + 1, COLOR_BORDER);
+        context.fill(x, y + height - 1, x + width, y + height, COLOR_BORDER);
+        context.fill(x, y + 1, x + 1, y + height - 1, COLOR_BORDER);
+        context.fill(
+            x + width - 1,
+            y + 1,
+            x + width,
+            y + height - 1,
+            COLOR_BORDER
+        );
     }
 
     private int getGradeColor(String grade) {
@@ -312,5 +348,80 @@ public class OverlayRenderer {
             case "C" -> 0xFFFFFF;
             default -> 0x808080;
         };
+    }
+
+    private void renderTradingStatusBar(
+        DrawContext context,
+        TextRenderer textRenderer,
+        RerollController controller
+    ) {
+        int screenWidth = client.getWindow().getScaledWidth();
+        int screenHeight = client.getWindow().getScaledHeight();
+
+        int hotbarY = screenHeight - 22;
+        int statusBarY = hotbarY - 14;
+
+        int statusBarWidth = 120;
+        int statusBarHeight = 10;
+        int statusBarX = (screenWidth - statusBarWidth) / 2;
+
+        if (controller.isRunning()) {
+            int pulseAlpha = (int) (Math.sin(animationTicks / 8.0) * 25 + 230);
+            int glowColor = (COLOR_ACCENT & 0x00FFFFFF) | (pulseAlpha << 24);
+
+            context.fill(
+                statusBarX - 1,
+                statusBarY - 1,
+                statusBarX + statusBarWidth + 1,
+                statusBarY + statusBarHeight + 1,
+                glowColor
+            );
+
+            context.fill(
+                statusBarX,
+                statusBarY,
+                statusBarX + statusBarWidth,
+                statusBarY + statusBarHeight,
+                0xE0000000
+            );
+
+            String statusText = "TRADING";
+            int textX =
+                statusBarX +
+                (statusBarWidth - textRenderer.getWidth(statusText)) / 2;
+            int textY = statusBarY + 1;
+
+            context.drawText(
+                textRenderer,
+                statusText,
+                textX,
+                textY,
+                COLOR_ACCENT,
+                true
+            );
+        } else {
+            context.fill(
+                statusBarX,
+                statusBarY,
+                statusBarX + statusBarWidth,
+                statusBarY + statusBarHeight,
+                0x80000000
+            );
+
+            String statusText = "IDLE";
+            int textX =
+                statusBarX +
+                (statusBarWidth - textRenderer.getWidth(statusText)) / 2;
+            int textY = statusBarY + 1;
+
+            context.drawText(
+                textRenderer,
+                statusText,
+                textX,
+                textY,
+                COLOR_TEXT_DIM,
+                true
+            );
+        }
     }
 }

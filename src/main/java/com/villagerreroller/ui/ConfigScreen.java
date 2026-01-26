@@ -3,8 +3,11 @@ package com.villagerreroller.ui;
 import com.villagerreroller.VillagerReroller;
 import com.villagerreroller.config.ModConfig;
 import com.villagerreroller.config.ProfileManager;
+import com.villagerreroller.trade.LibrarianEnchantments;
+import com.villagerreroller.trade.LibrarianEnchantments.EnchantmentOption;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
@@ -215,55 +218,78 @@ public class ConfigScreen {
                 .build()
         );
 
-        filters.addEntry(
-            entryBuilder
-                .startStrList(
-                    Text.literal("Item Whitelist"),
-                    new ArrayList<>(config.getItemWhitelist())
-                )
-                .setDefaultValue(new ArrayList<>())
-                .setTooltip(
-                    Text.literal(
-                        "Click + to add items. Type full item IDs like:\nminecraft:enchanted_book\nminecraft:diamond_pickaxe\nminecraft:diamond\nLeave empty to accept all items"
-                    )
-                )
-                .setSaveConsumer(list ->
-                    config.setItemWhitelist(new HashSet<>(list))
-                )
-                .build()
+        List<EnchantmentOption> enchantments =
+            LibrarianEnchantments.ALL_ENCHANTMENTS;
+        int currentEnchantIndex = LibrarianEnchantments.getIndex(
+            config.getSelectedEnchantment(),
+            config.getSelectedEnchantmentLevel()
         );
 
         filters.addEntry(
             entryBuilder
-                .startStrList(
-                    Text.literal("Item Blacklist"),
-                    new ArrayList<>(config.getItemBlacklist())
+                .startIntSlider(
+                    Text.literal("Target Enchantment"),
+                    currentEnchantIndex,
+                    0,
+                    enchantments.size() - 1
                 )
-                .setDefaultValue(new ArrayList<>())
+                .setDefaultValue(0)
                 .setTooltip(
                     Text.literal(
-                        "Click + to add items to blacklist. Type full item IDs like:\nminecraft:wheat\nminecraft:stick\nThese items will never be accepted"
+                        "Select the enchanted book you want to find.\nUse the slider to cycle through all available enchantments."
                     )
                 )
-                .setSaveConsumer(list ->
-                    config.setItemBlacklist(new HashSet<>(list))
-                )
+                .setTextGetter(value -> {
+                    EnchantmentOption opt = LibrarianEnchantments.getByIndex(
+                        value
+                    );
+                    int level = Math.min(
+                        config.getSelectedEnchantmentLevel(),
+                        opt.getMaxLevel()
+                    );
+                    return Text.literal(opt.getDisplayString(level));
+                })
+                .setSaveConsumer(value -> {
+                    EnchantmentOption opt = LibrarianEnchantments.getByIndex(
+                        value
+                    );
+                    config.setSelectedEnchantment(opt.getId());
+                    if (
+                        config.getSelectedEnchantmentLevel() > opt.getMaxLevel()
+                    ) {
+                        config.setSelectedEnchantmentLevel(opt.getMaxLevel());
+                    }
+                })
                 .build()
         );
 
+        EnchantmentOption currentEnchant = LibrarianEnchantments.getByIndex(
+            currentEnchantIndex
+        );
         filters.addEntry(
             entryBuilder
-                .startStrList(
-                    Text.literal("Enchantment Filters"),
-                    config.getEnchantmentFilters()
+                .startIntSlider(
+                    Text.literal("Enchantment Level"),
+                    config.getSelectedEnchantmentLevel(),
+                    1,
+                    currentEnchant.getMaxLevel()
                 )
-                .setDefaultValue(new ArrayList<>())
+                .setDefaultValue(currentEnchant.getMaxLevel())
                 .setTooltip(
                     Text.literal(
-                        "Click + to add enchantments. Format: enchantment:level\nminecraft:mending:1\nminecraft:sharpness:5\nminecraft:protection:4"
+                        "Select the minimum level for the enchantment.\nHigher levels are rarer and more expensive."
                     )
                 )
-                .setSaveConsumer(config::setEnchantmentFilters)
+                .setTextGetter(value -> {
+                    EnchantmentOption opt = LibrarianEnchantments.getByIndex(
+                        LibrarianEnchantments.getIndex(
+                            config.getSelectedEnchantment(),
+                            1
+                        )
+                    );
+                    return Text.literal(opt.getDisplayString(value));
+                })
+                .setSaveConsumer(config::setSelectedEnchantmentLevel)
                 .build()
         );
 
@@ -498,6 +524,10 @@ public class ConfigScreen {
             Text.literal("Profiles")
         );
 
+        ProfileManager profileManager = VillagerReroller.getInstance()
+            .getConfigManager()
+            .getProfileManager();
+
         profiles.addEntry(
             entryBuilder
                 .startTextField(
@@ -507,6 +537,50 @@ public class ConfigScreen {
                 .setDefaultValue("default")
                 .setTooltip(Text.literal("Currently active filter profile"))
                 .setSaveConsumer(config::setActiveProfile)
+                .build()
+        );
+
+        profiles.addEntry(
+            entryBuilder
+                .startTextDescription(
+                    Text.literal(
+                        "§7Available profiles: " +
+                            String.join(
+                                ", ",
+                                profileManager.getAllProfiles().keySet()
+                            )
+                    )
+                )
+                .build()
+        );
+
+        profiles.addEntry(
+            entryBuilder
+                .startTextDescription(
+                    Text.literal(
+                        "§eCreate new profile: Save current settings as a profile"
+                    )
+                )
+                .build()
+        );
+
+        profiles.addEntry(
+            entryBuilder
+                .startTextDescription(
+                    Text.literal(
+                        "§aLoad profile: Type profile name in 'Active Profile' and save config"
+                    )
+                )
+                .build()
+        );
+
+        profiles.addEntry(
+            entryBuilder
+                .startTextDescription(
+                    Text.literal(
+                        "§6Profiles are stored in: config/villager-reroller/profiles/"
+                    )
+                )
                 .build()
         );
 

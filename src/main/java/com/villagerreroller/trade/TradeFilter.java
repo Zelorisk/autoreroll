@@ -4,10 +4,6 @@ import com.villagerreroller.VillagerReroller;
 import com.villagerreroller.config.ModConfig;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
 
 public class TradeFilter {
 
@@ -37,164 +33,38 @@ public class TradeFilter {
     }
 
     public boolean matchesCriteria(TradeScanner.ScannedTrade trade) {
-        List<Boolean> conditions = new ArrayList<>();
-
-        if (!config.getItemWhitelist().isEmpty()) {
-            conditions.add(
-                config.getItemWhitelist().contains(trade.getItemId())
-            );
-        }
-
-        if (!config.getItemBlacklist().isEmpty()) {
-            conditions.add(
-                !config.getItemBlacklist().contains(trade.getItemId())
-            );
-        }
-
-        conditions.add(checkPriceThreshold(trade));
-
-        if (!config.getEnchantmentFilters().isEmpty()) {
-            conditions.add(checkEnchantmentFilters(trade));
-        }
-
-        if (!config.getCombinedEnchantments().isEmpty()) {
-            conditions.add(checkCombinedEnchantments(trade));
-        }
-
-        if (
-            !config.getPreferredFirstSlotItems().isEmpty() &&
-            trade.getSlotIndex() == 0
-        ) {
-            conditions.add(
-                config.getPreferredFirstSlotItems().contains(trade.getItemId())
-            );
-        }
-
-        if (conditions.isEmpty()) {
-            return true;
-        }
-
-        if (config.getFilterLogic() == ModConfig.FilterLogic.AND) {
-            return conditions.stream().allMatch(Boolean::booleanValue);
-        } else {
-            return conditions.stream().anyMatch(Boolean::booleanValue);
-        }
-    }
-
-    private boolean checkPriceThreshold(TradeScanner.ScannedTrade trade) {
-        int emeraldCost = trade.getEmeraldCost();
-
-        if (trade.isEnchantedBook()) {
-            return emeraldCost <= config.getMaxEmeraldsBooks();
-        }
-
-        String itemId = trade.getItemId();
-
-        if (isToolItem(itemId)) {
-            return emeraldCost <= config.getMaxEmeraldsTools();
-        }
-
-        if (isArmorItem(itemId)) {
-            return emeraldCost <= config.getMaxEmeraldsArmor();
-        }
-
-        return emeraldCost <= config.getMaxEmeraldsMisc();
-    }
-
-    private boolean checkEnchantmentFilters(TradeScanner.ScannedTrade trade) {
-        if (!trade.isEnchantedBook() && trade.getEnchantments().isEmpty()) {
-            return false;
-        }
-
-        List<String> tradeEnchants = trade.getEnchantmentNames();
-
-        for (String filter : config.getEnchantmentFilters()) {
-            for (String tradeEnchant : tradeEnchants) {
-                if (matchesEnchantmentFilter(tradeEnchant, filter)) {
-                    if (config.isRequireMaxEnchantmentLevel()) {
-                        String[] parts = tradeEnchant.split(":");
-                        String[] filterParts = filter.split(":");
-
-                        if (parts.length == 2 && filterParts.length == 2) {
-                            int tradeLevel = Integer.parseInt(parts[1]);
-                            int filterLevel = Integer.parseInt(filterParts[1]);
-
-                            if (tradeLevel == filterLevel) {
-                                return true;
-                            }
-                        }
-                    } else {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private boolean matchesEnchantmentFilter(
-        String tradeEnchant,
-        String filter
-    ) {
-        if (filter.contains("*")) {
-            String regex = filter.replace("*", ".*");
-            return tradeEnchant.matches(regex);
-        }
-
-        return (
-            tradeEnchant.equals(filter) ||
-            tradeEnchant.startsWith(filter.split(":")[0])
-        );
-    }
-
-    private boolean checkCombinedEnchantments(TradeScanner.ScannedTrade trade) {
         if (!trade.isEnchantedBook()) {
             return false;
         }
 
-        List<String> tradeEnchants = trade.getEnchantmentNames();
-
-        for (String requiredEnchant : config.getCombinedEnchantments()) {
-            boolean found = false;
-            for (String tradeEnchant : tradeEnchants) {
-                if (matchesEnchantmentFilter(tradeEnchant, requiredEnchant)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                return false;
-            }
+        if (!checkPriceThreshold(trade)) {
+            return false;
         }
 
-        return true;
+        return checkSelectedEnchantment(trade);
     }
 
-    private boolean isToolItem(String itemId) {
-        return (
-            itemId.contains("_pickaxe") ||
-            itemId.contains("_axe") ||
-            itemId.contains("_shovel") ||
-            itemId.contains("_hoe") ||
-            itemId.contains("_sword") ||
-            itemId.contains("shears") ||
-            itemId.contains("fishing_rod") ||
-            itemId.contains("bow") ||
-            itemId.contains("crossbow") ||
-            itemId.contains("trident")
-        );
+    private boolean checkSelectedEnchantment(TradeScanner.ScannedTrade trade) {
+        String targetEnchant = config.getSelectedEnchantment();
+        int targetLevel = config.getSelectedEnchantmentLevel();
+
+        for (String tradeEnchant : trade.getEnchantmentNames()) {
+            String[] parts = tradeEnchant.split(":");
+            if (parts.length >= 2) {
+                String enchantId = parts[0] + ":" + parts[1];
+                int level = parts.length > 2 ? Integer.parseInt(parts[2]) : 1;
+
+                if (enchantId.equals(targetEnchant) && level >= targetLevel) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    private boolean isArmorItem(String itemId) {
-        return (
-            itemId.contains("_helmet") ||
-            itemId.contains("_chestplate") ||
-            itemId.contains("_leggings") ||
-            itemId.contains("_boots") ||
-            itemId.contains("elytra") ||
-            itemId.contains("shield")
-        );
+    private boolean checkPriceThreshold(TradeScanner.ScannedTrade trade) {
+        int emeraldCost = trade.getEmeraldCost();
+        return emeraldCost <= config.getMaxEmeraldsBooks();
     }
 
     public boolean hasAnyMatchingTrade(List<TradeScanner.ScannedTrade> trades) {

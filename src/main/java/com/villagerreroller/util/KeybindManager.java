@@ -9,11 +9,13 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.passive.VillagerEntity;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class KeybindManager {
 
-    private static final String CATEGORY = "key.categories.villagerreroller";
+    private static final KeyBinding.Category CATEGORY =
+        KeyBinding.Category.create(Identifier.of("villagerreroller", "main"));
 
     private KeyBinding toggleModKey;
     private KeyBinding emergencyStopKey;
