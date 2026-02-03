@@ -48,6 +48,7 @@ public class RerollController {
     private long lastStatusLogTime = 0;
     private int initialPlacementAttempts = 0;
     private int consecutivePlacementFailures = 0;
+    private BlockPos fixedPlacementBlock = null;
 
     public RerollController() {
         this.client = MinecraftClient.getInstance();
@@ -89,6 +90,31 @@ public class RerollController {
         this.lastRerollTime = System.currentTimeMillis();
         this.placementRetries = 0;
         this.consecutivePlacementFailures = 0;
+
+        if (config.isUseFixedPlacementBlock()) {
+            BlockPos targetedBlock = getBlockPlayerIsLookingAt();
+            if (targetedBlock != null) {
+                fixedPlacementBlock = targetedBlock.up();
+                VillagerReroller.LOGGER.info(
+                    "Fixed placement block captured at {} (one block above targeted {})",
+                    fixedPlacementBlock,
+                    targetedBlock
+                );
+                NotificationHelper.displayClientMessage(
+                    "Placement block locked: " +
+                        fixedPlacementBlock.toShortString()
+                );
+            } else {
+                VillagerReroller.LOGGER.warn(
+                    "Fixed placement mode enabled but no block in crosshair!"
+                );
+                NotificationHelper.displayClientMessage(
+                    "§6Warning: No block in crosshair for fixed placement!"
+                );
+            }
+        } else {
+            fixedPlacementBlock = null;
+        }
 
         VillagerReroller.LOGGER.info(
             "=== Starting reroll for villager {} ===",
@@ -155,6 +181,8 @@ public class RerollController {
             currentState = RerollState.IDLE;
             currentJobSite = null;
             matchFound = false;
+            fixedPlacementBlock = null;
+            jobSiteHandler.setBlockToAvoid(null);
         }
     }
 
@@ -184,8 +212,16 @@ public class RerollController {
 
         if (matchFound) {
             VillagerReroller.LOGGER.debug(
-                "Match found flag is set, skipping state machine tick"
+                "✓✓✓ SAFETY CHECK: Match found flag is TRUE - State machine halted to preserve lectern ✓✓✓"
             );
+            if (client.player != null) {
+                long now = System.currentTimeMillis();
+                if (now % 5000 < 50) {
+                    NotificationHelper.displayClientMessage(
+                        "§a[PROTECTED] Trade match preserved - Lectern safe"
+                    );
+                }
+            }
             return;
         }
 
@@ -266,28 +302,45 @@ public class RerollController {
             case INITIAL_PLACEMENT:
                 if (!stateActionStarted) {
                     initialPlacementAttempts++;
-                    int maxPlacementReach = config.getPlacementReach();
-                    int searchRadius = Math.min(
-                        3 + initialPlacementAttempts,
-                        maxPlacementReach
-                    );
-                    VillagerReroller.LOGGER.info(
-                        "Attempting initial workstation placement (attempt {}/5, search radius {})...",
-                        initialPlacementAttempts,
-                        searchRadius
-                    );
+                    BlockPos placementPos = null;
+                    int searchRadius = 0;
 
-                    BlockPos villagerPos = currentVillager.getBlockPos();
-                    BlockPos placementPos = findSuitablePlacementPosition(
-                        villagerPos,
-                        searchRadius
-                    );
+                    if (
+                        config.isUseFixedPlacementBlock() &&
+                        fixedPlacementBlock != null
+                    ) {
+                        VillagerReroller.LOGGER.info(
+                            "Using fixed placement block at {} (attempt {}/5)...",
+                            fixedPlacementBlock.toShortString(),
+                            initialPlacementAttempts
+                        );
+                        placementPos = fixedPlacementBlock;
+                    } else {
+                        int maxPlacementReach = config.getPlacementReach();
+                        searchRadius = Math.min(
+                            3 + initialPlacementAttempts,
+                            maxPlacementReach
+                        );
+                        VillagerReroller.LOGGER.info(
+                            "Attempting initial workstation placement (attempt {}/5, search radius {})...",
+                            initialPlacementAttempts,
+                            searchRadius
+                        );
+
+                        BlockPos villagerPos = currentVillager.getBlockPos();
+                        placementPos = findSuitablePlacementPosition(
+                            villagerPos,
+                            searchRadius
+                        );
+                    }
 
                     if (placementPos == null) {
                         if (initialPlacementAttempts < 5) {
                             VillagerReroller.LOGGER.warn(
-                                "No placement position found at radius {}, retrying with larger radius (attempt {}/5)...",
-                                searchRadius,
+                                "No placement position found{}, retrying with larger radius (attempt {}/5)...",
+                                searchRadius > 0
+                                    ? " at radius " + searchRadius
+                                    : "",
                                 initialPlacementAttempts + 1
                             );
                             NotificationHelper.displayClientMessage(
@@ -345,17 +398,77 @@ public class RerollController {
                         return;
                     }
 
-                    currentJobSite = placementPos;
+                    BlockPos immutablePlacementPos = new BlockPos(
+                        placementPos.getX(),
+                        placementPos.getY(),
+                        placementPos.getZ()
+                    );
+
                     VillagerReroller.LOGGER.info(
-                        "✓ Placed initial workstation at {} (attempt {})",
-                        placementPos,
-                        initialPlacementAttempts
+                        "Checking for workstation at immutable position: {}",
+                        immutablePlacementPos
                     );
-                    NotificationHelper.displayClientMessage(
-                        "§aWorkstation placed successfully!"
+                    boolean foundAtExactPos = jobSiteHandler.isJobSiteBlock(
+                        immutablePlacementPos
                     );
-                    initialPlacementAttempts = 0;
-                    stateActionStarted = true;
+                    VillagerReroller.LOGGER.info(
+                        "Found at exact position: {}",
+                        foundAtExactPos
+                    );
+
+                    if (foundAtExactPos) {
+                        currentJobSite = immutablePlacementPos;
+                        VillagerReroller.LOGGER.info(
+                            "✓ Placed initial workstation at {} (attempt {})",
+                            immutablePlacementPos,
+                            initialPlacementAttempts
+                        );
+                        NotificationHelper.displayClientMessage(
+                            "§aWorkstation placed successfully!"
+                        );
+                        initialPlacementAttempts = 0;
+                        stateActionStarted = true;
+                    } else {
+                        BlockPos actualPlacement = findJobSiteBlockNear(
+                            immutablePlacementPos,
+                            2
+                        );
+                        if (actualPlacement != null) {
+                            currentJobSite = actualPlacement;
+                            VillagerReroller.LOGGER.info(
+                                "✓ Placed initial workstation at {} (attempt {})",
+                                actualPlacement,
+                                initialPlacementAttempts
+                            );
+                            NotificationHelper.displayClientMessage(
+                                "§aWorkstation placed successfully!"
+                            );
+                            initialPlacementAttempts = 0;
+                            stateActionStarted = true;
+                        } else {
+                            VillagerReroller.LOGGER.error(
+                                "Block placement succeeded but couldn't locate workstation near {}",
+                                placementPos
+                            );
+                            if (initialPlacementAttempts < 5) {
+                                NotificationHelper.displayClientMessage(
+                                    "§6Retrying workstation placement... (attempt " +
+                                        initialPlacementAttempts +
+                                        "/5)"
+                                );
+                                stateActionStarted = false;
+                                try {
+                                    Thread.sleep(100);
+                                } catch (InterruptedException e) {}
+                                return;
+                            }
+                            NotificationHelper.displayClientMessage(
+                                "§cFailed to place workstation! Could not verify placement."
+                            );
+                            stopRerolling();
+                            return;
+                        }
+                    }
                 }
 
                 if (timeSinceStateStart < 1000) {
@@ -364,7 +477,8 @@ public class RerollController {
 
                 if (!jobSiteHandler.isJobSiteBlock(currentJobSite)) {
                     VillagerReroller.LOGGER.error(
-                        "Placement verification failed!"
+                        "Placement verification failed at {}!",
+                        currentJobSite
                     );
                     NotificationHelper.displayClientMessage(
                         "Workstation placement failed!"
@@ -523,6 +637,20 @@ public class RerollController {
 
                 VillagerReroller.LOGGER.info("Looking for dropped item...");
                 jobSiteHandler.resetPickupState();
+
+                if (
+                    config.isUseFixedPlacementBlock() &&
+                    fixedPlacementBlock != null
+                ) {
+                    jobSiteHandler.setBlockToAvoid(fixedPlacementBlock);
+                    VillagerReroller.LOGGER.info(
+                        "Set block to avoid during pickup: {}",
+                        fixedPlacementBlock.toShortString()
+                    );
+                } else {
+                    jobSiteHandler.setBlockToAvoid(null);
+                }
+
                 transitionToState(RerollState.PICKING_UP_ITEM);
                 break;
             case PICKING_UP_ITEM:
@@ -624,15 +752,29 @@ public class RerollController {
                         return;
                     }
 
-                    VillagerReroller.LOGGER.info(
-                        "✓ Workstation found in inventory. Placing at {}... (attempt {})",
-                        currentJobSite,
-                        placementRetries + 1
-                    );
+                    BlockPos targetPlacementPos = currentJobSite;
 
-                    BlockPos originalAttemptPos = currentJobSite;
+                    if (
+                        config.isUseFixedPlacementBlock() &&
+                        fixedPlacementBlock != null
+                    ) {
+                        targetPlacementPos = fixedPlacementBlock;
+                        VillagerReroller.LOGGER.info(
+                            "✓ Workstation found in inventory. Placing at fixed position {}... (attempt {})",
+                            fixedPlacementBlock.toShortString(),
+                            placementRetries + 1
+                        );
+                    } else {
+                        VillagerReroller.LOGGER.info(
+                            "✓ Workstation found in inventory. Placing at {}... (attempt {})",
+                            currentJobSite,
+                            placementRetries + 1
+                        );
+                    }
+
+                    BlockPos originalAttemptPos = targetPlacementPos;
                     boolean replaced = jobSiteHandler.replaceJobSite(
-                        currentJobSite
+                        targetPlacementPos
                     );
 
                     if (!replaced) {
@@ -925,42 +1067,89 @@ public class RerollController {
                             matchFound = true;
 
                             VillagerReroller.LOGGER.info(
-                                "=== MATCH FOUND! ==="
+                                "╔═══════════════════════════════════════════════════════════════════"
                             );
                             VillagerReroller.LOGGER.info(
-                                "Found {} matching trade(s) after {} attempts:",
-                                matchingTrades.size(),
+                                "║ ⭐⭐⭐ MATCH FOUND! DESIRED TRADE DETECTED! ⭐⭐⭐"
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "╠═══════════════════════════════════════════════════════════════════"
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "║ Total attempts: {}",
                                 currentAttempts
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "║ Matching trades found: {}",
+                                matchingTrades.size()
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "║ System state: {}",
+                                currentState
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "║ Time: {}",
+                                new java.text.SimpleDateFormat(
+                                    "HH:mm:ss"
+                                ).format(new java.util.Date())
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "╠═══════════════════════════════════════════════════════════════════"
                             );
 
                             for (TradeScanner.ScannedTrade matchedTrade : matchingTrades) {
                                 VillagerReroller.LOGGER.info(
-                                    "  ✓ MATCHED [Slot {}]: {}",
-                                    matchedTrade.getSlotIndex(),
-                                    matchedTrade.toString()
+                                    "║ ✓ MATCHED TRADE [Slot {}]:",
+                                    matchedTrade.getSlotIndex()
                                 );
                                 VillagerReroller.LOGGER.info(
-                                    "    - Item: {}",
+                                    "║   → Item: {}",
                                     matchedTrade.getItemId()
                                 );
                                 VillagerReroller.LOGGER.info(
-                                    "    - Emerald Cost: {}",
+                                    "║   → Emerald Cost: {}",
                                     matchedTrade.getEmeraldCost()
                                 );
                                 if (!matchedTrade.getEnchantments().isEmpty()) {
                                     VillagerReroller.LOGGER.info(
-                                        "    - Enchantments: {}",
-                                        matchedTrade.getEnchantments()
+                                        "║   → Enchantments:"
                                     );
+                                    for (String ench : matchedTrade.getEnchantmentNames()) {
+                                        VillagerReroller.LOGGER.info(
+                                            "║      * {}",
+                                            ench
+                                        );
+                                    }
                                 }
+                                VillagerReroller.LOGGER.info(
+                                    "║   → Full details: {}",
+                                    matchedTrade.toString()
+                                );
+                                VillagerReroller.LOGGER.info("║");
                             }
 
                             VillagerReroller.LOGGER.info(
-                                "=== STOPPING REROLL - MATCH FOUND ==="
+                                "╠═══════════════════════════════════════════════════════════════════"
                             );
-                            NotificationHelper.displayClientMessage(
-                                "§a§l✓ FOUND MATCHING TRADE! Attempts: " +
-                                    currentAttempts
+                            VillagerReroller.LOGGER.info(
+                                "║ ACTION: Stopping reroll process"
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "║ STATUS: Lectern will be preserved"
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "║ GUI: {}",
+                                config.isOpenGuiOnlyWhenMatched()
+                                    ? "Keeping open for trading"
+                                    : "Closing"
+                            );
+                            VillagerReroller.LOGGER.info(
+                                "╚═══════════════════════════════════════════════════════════════════"
+                            );
+
+                            NotificationHelper.sendMatchFoundAlert(
+                                matchingTrades,
+                                currentAttempts
                             );
 
                             VillagerReroller.getInstance()
@@ -969,20 +1158,20 @@ public class RerollController {
 
                             if (config.isOpenGuiOnlyWhenMatched()) {
                                 VillagerReroller.LOGGER.info(
-                                    "Keeping merchant GUI open for trading (openGuiOnlyWhenMatched=true)"
+                                    "DEBUG: Keeping merchant GUI open for trading (openGuiOnlyWhenMatched=true)"
                                 );
                             } else {
                                 if (client.player != null) {
                                     client.player.closeHandledScreen();
                                     VillagerReroller.LOGGER.info(
-                                        "Closed merchant GUI"
+                                        "DEBUG: Closed merchant GUI"
                                     );
                                 }
                             }
 
                             stopRerolling();
                             VillagerReroller.LOGGER.info(
-                                "Reroll process stopped successfully - lectern preserved"
+                                "DEBUG: Reroll process stopped successfully - lectern preserved - matchFound flag is now TRUE"
                             );
                             return;
                         } else {
@@ -1294,6 +1483,28 @@ public class RerollController {
             placementRetries
         );
         VillagerReroller.LOGGER.info("=== END DEBUG STATE ===");
+    }
+
+    private BlockPos getBlockPlayerIsLookingAt() {
+        if (client.player == null || client.world == null) {
+            return null;
+        }
+
+        net.minecraft.util.hit.HitResult hitResult = client.player.raycast(
+            20.0,
+            0.0f,
+            false
+        );
+
+        if (
+            hitResult.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK
+        ) {
+            net.minecraft.util.hit.BlockHitResult blockHitResult =
+                (net.minecraft.util.hit.BlockHitResult) hitResult;
+            return blockHitResult.getBlockPos();
+        }
+
+        return null;
     }
 
     private static class VillagerState {

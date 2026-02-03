@@ -40,6 +40,7 @@ public class JobSiteHandler {
     private long lastProgressTime = 0;
     private double lastDistanceToItem = Double.MAX_VALUE;
     private int stuckTicks = 0;
+    private BlockPos blockToAvoid = null;
 
     private static final Block[] JOB_SITE_BLOCKS = {
         Blocks.LECTERN,
@@ -531,6 +532,14 @@ public class JobSiteHandler {
         }
     }
 
+    public void setBlockToAvoid(BlockPos pos) {
+        this.blockToAvoid = pos;
+        VillagerReroller.LOGGER.debug(
+            "Block to avoid set to: {}",
+            pos != null ? pos.toShortString() : "none"
+        );
+    }
+
     public int tryPickupItem() {
         ClientPlayerEntity player = client.player;
         World world = client.world;
@@ -719,6 +728,55 @@ public class JobSiteHandler {
             player.getY(),
             player.getZ()
         );
+
+        if (blockToAvoid != null) {
+            BlockPos playerBlockPos = player.getBlockPos();
+
+            if (
+                playerBlockPos.equals(blockToAvoid) ||
+                playerBlockPos.equals(blockToAvoid.up())
+            ) {
+                VillagerReroller.LOGGER.info(
+                    "Player is on fixed placement block {}, moving away before continuing to item",
+                    blockToAvoid.toShortString()
+                );
+
+                Vec3d blockCenter = Vec3d.ofCenter(blockToAvoid);
+                Vec3d awayFromBlock = playerPos
+                    .subtract(blockCenter)
+                    .normalize();
+
+                Vec3d escapeVelocity = awayFromBlock.multiply(
+                    speed * 1.5,
+                    0,
+                    speed * 1.5
+                );
+
+                if (shouldJump && player.isOnGround()) {
+                    player.setVelocity(
+                        escapeVelocity.x,
+                        0.42,
+                        escapeVelocity.z
+                    );
+                } else {
+                    player.setVelocity(
+                        escapeVelocity.x,
+                        player.getVelocity().y,
+                        escapeVelocity.z
+                    );
+                }
+
+                Vec3d nudge = awayFromBlock.multiply(0.05, 0, 0.05);
+                player.setPosition(
+                    player.getX() + nudge.x,
+                    player.getY(),
+                    player.getZ() + nudge.z
+                );
+
+                return;
+            }
+        }
+
         Vec3d direction = targetPos.subtract(playerPos).normalize();
 
         Vec3d targetVelocity = direction.multiply(speed, 0, speed);

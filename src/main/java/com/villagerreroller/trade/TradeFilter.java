@@ -18,14 +18,47 @@ public class TradeFilter {
     ) {
         List<TradeScanner.ScannedTrade> filtered = new ArrayList<>();
 
+        VillagerReroller.LOGGER.info("=== TRADE FILTER DEBUG ===");
+        VillagerReroller.LOGGER.info("Scanning {} trades", trades.size());
+        VillagerReroller.LOGGER.info(
+            "Target: {} level {}",
+            config.getSelectedEnchantment(),
+            config.getSelectedEnchantmentLevel()
+        );
+        VillagerReroller.LOGGER.info(
+            "Max emerald cost: {}",
+            config.getMaxEmeraldsBooks()
+        );
+
         for (TradeScanner.ScannedTrade trade : trades) {
-            if (matchesCriteria(trade)) {
+            boolean matches = matchesCriteria(trade);
+            VillagerReroller.LOGGER.info(
+                "  Trade [Slot {}]: {} - MATCH: {}",
+                trade.getSlotIndex(),
+                trade.getItemId(),
+                matches ? "YES ✓" : "NO"
+            );
+            if (trade.isEnchantedBook()) {
+                VillagerReroller.LOGGER.info(
+                    "    → Enchantments: {}",
+                    trade.getEnchantmentNames()
+                );
+                VillagerReroller.LOGGER.info(
+                    "    → Cost: {} emeralds",
+                    trade.getEmeraldCost()
+                );
+            }
+
+            if (matches) {
                 filtered.add(trade);
+                VillagerReroller.LOGGER.info(
+                    "    ★★★ TRADE MATCHED CRITERIA ★★★"
+                );
             }
         }
 
-        VillagerReroller.LOGGER.debug(
-            "Filtered {} trades from {} total",
+        VillagerReroller.LOGGER.info(
+            "Filter result: {} matching trades from {} total",
             filtered.size(),
             trades.size()
         );

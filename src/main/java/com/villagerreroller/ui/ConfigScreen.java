@@ -520,6 +520,22 @@ public class ConfigScreen {
                 .build()
         );
 
+        reachPlacement.addEntry(
+            entryBuilder
+                .startBooleanToggle(
+                    Text.literal("Use Fixed Placement Block"),
+                    config.isUseFixedPlacementBlock()
+                )
+                .setDefaultValue(false)
+                .setTooltip(
+                    Text.literal(
+                        "Always place lectern on the block you're looking at when toggling mod\nWhen enabled, look at target block before starting reroll\nMod will automatically walk out of the way before placing"
+                    )
+                )
+                .setSaveConsumer(config::setUseFixedPlacementBlock)
+                .build()
+        );
+
         ConfigCategory profiles = builder.getOrCreateCategory(
             Text.literal("Profiles")
         );
